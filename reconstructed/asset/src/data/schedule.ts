@@ -11,7 +11,7 @@
      with the Firebase web config); the code path below is ready for it. */
 
 import { db, firebaseEnabled } from '../firebase';
-import { deleteDoc, doc, onSnapshot, setDoc, collection } from 'firebase/firestore';
+import { collection, deleteDoc, doc, onSnapshot, query, setDoc, where } from 'firebase/firestore';
 
 export interface Assignment { route: string; status: string; usps: boolean }
 
@@ -78,6 +78,41 @@ export async function setAssignment(tractor: string, date: string, a: Assignment
   }
 }
 
+/* Move an assignment from one cell to another (drag-to-move). */
+export async function moveAssignment(fromKey: string, toKey: string) {
+  if (fromKey === toKey) return;
+  const a = readLocal()[fromKey];
+  if (!a) return;
+  const to = parseCellKey(toKey);
+  const from = parseCellKey(fromKey);
+  await setAssignment(to.tractor, to.date, a);
+  await setAssignment(from.tractor, from.date, null);
+}
+
+/* ---- reverse coincide: Bravo → Asset ------------------------------------ */
+export interface BravoLoad { laneId: string; date: string; status: string; carrier?: string; truckNumber?: string; loadNumber?: string }
+export interface BravoLane { id: string; tripCode?: string; origin?: string; destination?: string }
+
+const BRAVO_STATUS: Record<string, string> = {
+  asset: 'covered', covered: 'covered', dispatched: 'dispatched', departed: 'departed',
+  delivered: 'delivered', booked_rc_pending: 'covered', rc_signed: 'covered', gtg: 'covered',
+};
+
+/* Map a Bravo load that's on ONE OF OUR TRUCKS (truckNumber is a GH-only field)
+   into an Asset Matrix cell, auto-filling the route from the lane. This is the
+   reverse of the mirror: a load assigned to a GH truck on the Bravo Matrix shows
+   up here for that team, pre-filled — no re-keying. Pure + unit-testable. */
+export function mapBravoAssetLoad(load: BravoLoad, laneById: Map<string, BravoLane>): { key: string; assignment: Assignment } | null {
+  const truck = (load.truckNumber ?? '').trim();
+  if (!truck) return null;
+  const lane = laneById.get(load.laneId);
+  const trip = (lane?.tripCode ?? '').trim();
+  const o = (lane?.origin ?? '').split('\n')[0].trim();
+  const d = (lane?.destination ?? '').split('\n')[0].trim();
+  const route = [trip, o && d ? `${o}→${d}` : ''].filter(Boolean).join(' ').trim() || (load.loadNumber ?? 'Load');
+  return { key: cellKey(truck, load.date), assignment: { route, status: BRAVO_STATUS[load.status] ?? 'covered', usps: true } };
+}
+
 /* LIVE-only: mirror a USPS asset assignment into Bravo's shared `loads` as
    status:'asset' so it appears on the Bravo Matrix too. Requires resolving the
    route's FA2D3 trip code to a Bravo laneId (lookup against the shared `lanes`
@@ -95,9 +130,19 @@ async function mirrorToBravo(tractor: string, date: string, a: Assignment | null
    loadAssignments() in demo; wire this when Firebase is configured. */
 export function subscribeAssignments(cb: (map: Record<string, Assignment>) => void): () => void {
   if (!firebaseEnabled || !db) { cb(readLocal()); return () => {}; }
-  return onSnapshot(collection(db, 'assetSchedule'), (snap) => {
-    const map: Record<string, Assignment> = {};
-    snap.forEach((d) => { const v = d.data() as Assignment & { tractor: string; date: string }; map[d.id] = { route: v.route, status: v.status, usps: v.usps }; });
-    cb(map);
-  });
+  /* Live board = Bravo's asset loads (reverse-mapped, auto-filled) MERGED with
+     the asset team's own edits, which win on conflict. Three shared collections. */
+  let laneById = new Map<string, BravoLane>();
+  let bravoLoads: BravoLoad[] = [];
+  let assetNative: Record<string, Assignment> = {};
+  const emit = () => {
+    const merged: Record<string, Assignment> = {};
+    for (const l of bravoLoads) { const m = mapBravoAssetLoad(l, laneById); if (m) merged[m.key] = m.assignment; }
+    Object.assign(merged, assetNative); // asset-native edits override the mirror
+    cb(merged);
+  };
+  const u1 = onSnapshot(collection(db, 'lanes'), (s) => { laneById = new Map(s.docs.map((d) => [d.id, { ...(d.data() as BravoLane), id: d.id }])); emit(); });
+  const u2 = onSnapshot(query(collection(db, 'loads'), where('truckNumber', '!=', '')), (s) => { bravoLoads = s.docs.map((d) => d.data() as BravoLoad); emit(); });
+  const u3 = onSnapshot(collection(db, 'assetSchedule'), (s) => { assetNative = {}; s.forEach((d) => { const v = d.data() as Assignment; assetNative[d.id] = { route: v.route, status: v.status, usps: v.usps }; }); emit(); });
+  return () => { u1(); u2(); u3(); };
 }

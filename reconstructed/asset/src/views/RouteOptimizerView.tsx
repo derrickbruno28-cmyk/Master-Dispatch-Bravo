@@ -92,7 +92,7 @@ export default function RouteOptimizerView() {
                   <table className="am-grid opt-table">
                     <thead>
                       <tr>
-                        <th>Deadhead</th><th>Route</th><th>Loaded mi</th><th>Rate</th><th>Est. hrs</th><th>Homeward</th><th>Fits HOS</th><th></th>
+                        <th>Deadhead</th><th>Route</th><th>Loaded mi</th><th>Est. hrs</th><th>Homeward</th><th>Fits HOS</th><th></th>
                       </tr>
                     </thead>
                     <tbody>
@@ -101,7 +101,6 @@ export default function RouteOptimizerView() {
                           <td className="opt-dh"><b>{m.dh}</b> mi</td>
                           <td className="opt-route">{m.route}<span className="am-muted"> · {m.planning}</span></td>
                           <td>{m.miles}</td>
-                          <td className="opt-rate">{m.rate}</td>
                           <td>{m.hrs}h</td>
                           <td>{m.hw > 0 ? <span className="opt-hw"><span className="opt-hw-bar" style={{ width: `${m.hw}%` }} />{m.hw}%</span> : <span className="am-muted">—</span>}</td>
                           <td>{m.ok ? <span style={{ color: 'var(--green)' }}>✓</span> : <span style={{ color: 'var(--red)' }}>over</span>}</td>

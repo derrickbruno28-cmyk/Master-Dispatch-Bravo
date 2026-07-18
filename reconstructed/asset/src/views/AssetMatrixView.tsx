@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { TRUCKS, TERMINALS, TERMINAL_LABELS, ROUTES, type Truck } from '../data/fleet';
 import {
-  loadAssignments, setAssignment, ensureSeed, cellKey, parseCellKey,
+  loadAssignments, setAssignment, moveAssignment, ensureSeed, cellKey, parseCellKey,
   isoDate, mondayOf, addDays, type Assignment,
 } from '../data/schedule';
 
@@ -58,6 +58,16 @@ export default function AssetMatrixView() {
     void setAssignment(tractor, date, clear ? null : a);
   }
 
+  /* drag an assignment onto an empty day (same or another truck) to move it */
+  function move(fromKey: string, toKey: string) {
+    if (fromKey === toKey) return;
+    setAssign((prev) => {
+      const a = prev[fromKey]; if (!a) return prev;
+      const next = { ...prev }; delete next[fromKey]; next[toKey] = a; return next;
+    });
+    void moveAssignment(fromKey, toKey);
+  }
+
   return (
     <div className="am-page">
       <div className="am-head">
@@ -110,6 +120,7 @@ export default function AssetMatrixView() {
                 editing={editing}
                 setEditing={setEditing}
                 save={save}
+                move={move}
               />
             ))}
           </tbody>
@@ -119,10 +130,11 @@ export default function AssetMatrixView() {
   );
 }
 
-function TerminalRows({ term, trucks, dates, assign, editing, setEditing, save }: {
+function TerminalRows({ term, trucks, dates, assign, editing, setEditing, save, move }: {
   term: string; trucks: Truck[]; dates: string[];
   assign: Record<string, Assignment>; editing: string | null;
   setEditing: (k: string | null) => void; save: (k: string, a: Assignment) => void;
+  move: (fromKey: string, toKey: string) => void;
 }) {
   return (
     <>
@@ -139,10 +151,27 @@ function TerminalRows({ term, trucks, dates, assign, editing, setEditing, save }
             const a = assign[k];
             if (editing === k) return <td key={d} className="am-cell"><CellEditor init={a} onSave={(x) => save(k, x)} onCancel={() => setEditing(null)} /></td>;
             return (
-              <td key={d} className="am-cell" onClick={() => setEditing(k)}>
+              <td
+                key={d}
+                className="am-cell"
+                onClick={() => setEditing(k)}
+                onDragOver={(e) => { if (a === undefined) e.preventDefault(); }}
+                onDrop={(e) => { const from = e.dataTransfer.getData('text/plain'); if (from) move(from, k); }}
+              >
                 {a ? (
-                  <div className="am-assign" style={{ borderLeftColor: STATUS_COLOR[a.status] }}>
-                    <div className="am-route">{a.route}{a.usps && <span className="am-usps">USPS</span>}</div>
+                  <div
+                    className="am-assign"
+                    style={{ borderLeftColor: STATUS_COLOR[a.status] }}
+                    draggable
+                    onDragStart={(e) => { e.stopPropagation(); e.dataTransfer.setData('text/plain', k); }}
+                    onContextMenu={(e) => { e.preventDefault(); if (window.confirm('Clear this assignment?')) save(k, { route: '', status: a.status, usps: a.usps }); }}
+                    title="Drag to an empty day to move · right-click to clear"
+                  >
+                    <div className="am-route">
+                      {a.route}
+                      {a.usps && <span className="am-usps">USPS</span>}
+                      {a.usps && <span className="am-bravo" title="USPS contract — coincides with Bravo Matrix">⇄ Bravo</span>}
+                    </div>
                     <div className="am-status" style={{ color: STATUS_COLOR[a.status] }}>{STATUS_LABEL[a.status] ?? a.status}</div>
                   </div>
                 ) : <span className="am-add">+</span>}
