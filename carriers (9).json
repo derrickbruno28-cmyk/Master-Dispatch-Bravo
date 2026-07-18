@@ -1,0 +1,404 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function isCompanyUser() {
+      return request.auth != null
+        && request.auth.token.email_verified
+        && request.auth.token.email.matches('.*@(ghlogisticsllc|ajgtransport)[.]com$');
+    }
+
+    /* ---- Phase 2 role model. The caller's role lives in users/{uid}.
+       Legacy 'user' docs are treated as broker_rep (client migrates them).
+       v2.18.0 EXPRESSION-BUDGET REWRITE: Firestore rules evaluate at most
+       1000 expressions per request — the v2.16 helper nesting blew that
+       limit on complex load writes ("Missing or insufficient permissions"
+       for perfectly-permitted brokers). Helpers are now FLAT: udata() has
+       no exists() ternary (a missing user doc errors → deny, same outcome),
+       Map.get() defaults replace 'in' probes, and isCompanyUser() is
+       asserted ONCE per allow statement instead of inside every helper —
+       every helper below ASSUMES the caller checked isCompanyUser(). */
+    function udata() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+    function normRole() {
+      return udata().get('role', 'base') == 'user' ? 'broker_rep' : udata().get('role', 'base');
+    }
+    function isAdminTier() {
+      return normRole() in ['owner', 'pricing_manager', 'asset_admin', 'admin'];
+    }
+    function isBooker() {
+      return normRole() in ['owner', 'pricing_manager', 'asset_admin', 'admin', 'broker_rep'];
+    }
+    function isPricing() {
+      return normRole() in ['owner', 'pricing_manager', 'pricing_rep'];
+    }
+    function isAssetRep() {
+      return normRole() == 'asset_rep';
+    }
+    /* §9.1: BOL verification is QA Manager / Owner ONLY — deliberately not
+       admin-tier, so booking approvers aren't verifying their own work. */
+    function isQa() {
+      return normRole() in ['qa_manager', 'qa_rep', 'owner'];
+    }
+    /* Chargeback DECISIONS (status beyond pending, waive, void) — FCC /
+       Pricing Manager / Owner only (Caleb 07/10). Logging stays broad. */
+    function isCbDecider() {
+      return normRole() in ['owner', 'pricing_manager'] || isFedCom();
+    }
+    function cbDecisionOk() {
+      let keys = request.resource.data.diff(resource.data).affectedKeys();
+      return !keys.hasAny(['chargebackStatus', 'chargebackWaiveNote', 'chargebackWaivedBy', 'chargebackWaivedAt'])
+        || (request.resource.data.keys().hasAny(['chargebackStatus']) && request.resource.data.chargebackStatus == 'pending')
+        || hasPerm('admin.chargebacks.decide', isCbDecider());
+    }
+    function isFedCom() {
+      return udata().get('role', '') == 'owner'
+        || (udata().get('role', '') == 'admin' && udata().get('fedCom', false) == true);
+    }
+
+    /* ---- v2.11 granular overrides (permissions.ts is the client mirror).
+       Deny beats allow beats role default. The owner is never denied
+       structurally: the Permissions editor never renders for owner rows,
+       so an owner doc can never carry permDeny. */
+    function allowP(p) {
+      return udata().get('permAllow', []).hasAny([p]);
+    }
+    function denyP(p) {
+      return udata().get('permDeny', []).hasAny([p]);
+    }
+    function hasPerm(p, def) {
+      return !denyP(p) && (def || allowP(p));
+    }
+
+    function isGhCarrier(c) {
+      return c.matches('(?i)(.*\\bgh\\b.*|.*gh\\s*logistics.*)');
+    }
+    /* Asset Rep lane scope: GHL-dedicated lanes + open lanes only. */
+    function laneOpenToAsset(laneId) {
+      let lane = get(/databases/$(database)/documents/lanes/$(laneId)).data;
+      return !('dedicatedCarrier' in lane) || lane.dedicatedCarrier == '' || isGhCarrier(lane.dedicatedCarrier);
+    }
+
+    /* Booker-writable load fields. Hub working fields (postedRate, equipment,
+       teamSolo, hubNotes/hubNoteLog, pinnedNight, hideFromBoard) are
+       admin-tier only. bookingApproved=true (clearing the hub) is admin-tier —
+       EXCEPT alongside a carrier write, which is the TMS-import pattern
+       (imported tenders arrive pre-approved). */
+    function bookerKeysOnly() {
+      return request.resource.data.diff(resource.data).affectedKeys().hasOnly(
+        ['loadNumber', 'carrier', 'rate', 'rateNotes', 'status', 'bookedBy', 'bookingApproved', 'history', 'truckNumber', 'cancelReason', 'pinnedNight',
+         'tonuBill', 'softBook', 'onSiteAt', 'departedAt', 'deliveredAt', 'ppwkAt', 'defcon', 'nextEmailAt',
+         'trailerNumber', 'trailerReturnSite', 'trailerFreeDays', 'trailerReturnedAt', 'trailerNotes', 'trailerBilledDays', 'trailerBilledAt', 'trailerFineOverride', 'isShuttle', 'shuttleType', 'shuttleLocation', 'shuttleCarrier', 'shuttleTruckNumber', 'shuttleAssetLs', 'shuttleSplitPct', 'shuttleLegStatus', 'shuttleLegNotes',
+         'shuttleCity', 'shuttleState', 'shuttleSwapEta', 'shuttlePostedRate',
+         'chargebackClass', 'chargebackAmount', 'chargebackStatus', 'chargebackCarrier', 'chargebackBy', 'chargebackAt']
+      );
+    }
+    /* §7.2/§7.4: non-admin loggers may only OPEN a chargeback (status stays
+       'pending'); the absorb decision (confirmed/disputed/recovered) is the
+       'admin.chargebacks' permission. */
+    function chargebackOk() {
+      let keys = request.resource.data.diff(resource.data).affectedKeys();
+      return (!keys.hasAny(['chargebackStatus'])
+          || request.resource.data.chargebackStatus == 'pending')
+        /* classifying a fallout as "No Chargeback" is admin-tier only */
+        && (!keys.hasAny(['chargebackClass'])
+          || request.resource.data.chargebackClass != 'none'
+          || isAdminTier());
+    }
+    function noChargebackKeys() {
+      return !request.resource.data.diff(resource.data).affectedKeys().hasAny(
+        ['chargebackClass', 'chargebackAmount', 'chargebackStatus', 'chargebackCarrier', 'chargebackBy', 'chargebackAt']
+      ) && request.resource.data.status != 'chargeback';
+    }
+    function bookerApprovalOk() {
+      let keys = request.resource.data.diff(resource.data).affectedKeys();
+      return !keys.hasAny(['bookingApproved'])
+        || request.resource.data.bookingApproved != true
+        || keys.hasAny(['carrier']);
+    }
+    /* Create-time approval check (missing-key-safe — reading an absent field
+       errors). bookingApproved=true on CREATE is allowed only alongside a
+       carrier: that's the TMS-import pattern (imported tenders arrive
+       pre-approved); a lone approval flag is still admin-tier. */
+    function createApprovalOk() {
+      return !('bookingApproved' in request.resource.data)
+        || request.resource.data.bookingApproved != true
+        || request.resource.data.carrier != '';
+    }
+    /* v2.11 standalone-grant key sets (each may also touch history). */
+    function hubFieldKeysOnly() {
+      return request.resource.data.diff(resource.data).affectedKeys().hasOnly(
+        ['postedRate', 'equipment', 'teamSolo', 'hubNotes', 'hubNoteLog', 'pinnedNight', 'history']);
+    }
+    /* v2.33.0: loadboard hide/show is its own permission (hub.board) */
+    function boardKeysOnly() {
+      return request.resource.data.diff(resource.data).affectedKeys().hasOnly(
+        ['hideFromBoard', 'history']);
+    }
+    function approveKeysOnly() {
+      return request.resource.data.diff(resource.data).affectedKeys().hasOnly(
+        ['bookingApproved', 'bookingApprovedBy', 'bookingApprovedAt', 'history']);
+    }
+    function cbDecisionKeysOnly() {
+      return request.resource.data.diff(resource.data).affectedKeys().hasOnly(
+        ['chargebackStatus', 'chargebackWaiveNote', 'chargebackWaivedBy', 'chargebackWaivedAt', 'history']);
+    }
+    /* Deny-guards for the admin full-write branch: a denied capability must
+       hold even for admin-tier users. */
+    function adminDeniesOk() {
+      let keys = request.resource.data.diff(resource.data).affectedKeys();
+      return (!keys.hasAny(['postedRate', 'equipment', 'teamSolo', 'hubNotes', 'hubNoteLog', 'pinnedNight']) || !denyP('hub.fields'))
+        && (!keys.hasAny(['hideFromBoard']) || !denyP('hub.board'))
+        && (!keys.hasAny(['bookingApproved']) || request.resource.data.bookingApproved != true || keys.hasAny(['carrier']) || !denyP('hub.approve'))
+        && cbDecisionOk();
+    }
+
+    // Carrier loadboard mirror: readable by ANY signed-in Google account.
+    // Written by whoever mutates loads (mirror sync runs client-side).
+    match /loadboard/{tripId} {
+      allow read: if request.auth != null;
+      allow write: if isCompanyUser() && hasPerm('matrix.book', isBooker() || isAssetRep());
+    }
+
+    // Loadboard registrations (carrier side unchanged); responding is a permission.
+    match /carrierUsers/{uid} {
+      allow create: if request.auth != null
+        && request.auth.uid == uid
+        && request.resource.data.email == request.auth.token.email
+        && request.resource.data.status == 'pending';
+      allow read: if isCompanyUser() || (request.auth != null && request.auth.uid == uid);
+      allow update: if isCompanyUser() && hasPerm('admin.registrations', isAdminTier());
+      allow delete: if false;
+    }
+
+    function isApprovedCarrier() {
+      return request.auth != null
+        && exists(/databases/$(database)/documents/carrierUsers/$(request.auth.uid))
+        && get(/databases/$(database)/documents/carrierUsers/$(request.auth.uid)).data.status == 'approved';
+    }
+
+    // Carrier offers: carriers create their own; responding books the load.
+    match /offers/{offerId} {
+      allow create: if isApprovedCarrier()
+        && request.resource.data.email == request.auth.token.email
+        && request.resource.data.status == 'pending';
+      allow read: if isCompanyUser()
+        || (request.auth != null && resource.data.email == request.auth.token.email);
+      allow update: if isCompanyUser() && hasPerm('hub.offers', isBooker());
+      allow delete: if false;
+    }
+
+    // Access log: unchanged.
+    match /loadboardAccess/{entryId} {
+      allow create: if request.auth != null
+        && request.resource.data.email == request.auth.token.email
+        && request.resource.data.uid == request.auth.uid;
+      allow read: if isCompanyUser();
+      allow update, delete: if false;
+    }
+
+    // Highway-contact verification requests: registrations permission creates;
+    // Cloud Functions (Admin SDK, bypasses rules) do everything else.
+    match /verificationRequests/{id} {
+      allow create, read: if isCompanyUser() && hasPerm('admin.registrations', isAdminTier());
+      allow update, delete: if false;
+    }
+
+    // §6.4 empty-truck snapshot: written ONLY by Cloud Functions (08:00 CT
+    // schedule + admin-gated rebuild callable); company-wide read.
+    match /capacity/{docId} {
+      allow read: if isCompanyUser();
+      allow write: if false;
+    }
+
+    // v2.22.0 Rate Check: rateCheckLanes / rateCheckRouteCache / rateCheckLogs /
+    // rateCheckMeta deliberately have NO match blocks — contract rates must
+    // never reach a client, so those collections are Cloud-Function-only
+    // (Admin SDK bypasses rules; clients get default-deny). Do not add rules.
+
+    // §7.1 dedicated-day master: planning data. Pricing tier + FedCom
+    // admins (v2.18.0 — Zack manages dedicated assignments incl. removal).
+    match /dedicated/{id} {
+      allow read: if isCompanyUser();
+      allow write: if isCompanyUser() && hasPerm('integrity.dedicated', isPricing() || isFedCom());
+    }
+
+    // §8.1 margin settings (fuel/FSC/breakeven/company) — morale stays owner-only.
+    match /settings/{docId} {
+      allow read: if isCompanyUser();
+      /* roleDefaults = the OWNER-editable role-permission matrix (v2.32.0).
+         Owner-only, like morale — nobody else may reshape role powers. */
+      allow write: if isCompanyUser() && (
+        (docId == 'roleDefaults' && normRole() == 'owner')
+        || (docId != 'morale' && docId != 'roleDefaults' && hasPerm('analytics.settings', isAdminTier() || isPricing()))
+        || (docId == 'morale' && normRole() == 'owner'));
+    }
+
+    // Phase 3 integrity DB: bands (cost side) and TRM (revenue side) carry
+    // separate permissions; a mixed write needs both. Band history immutable.
+    match /integrity/{tripId} {
+      allow read: if isCompanyUser();
+      /* pricing: full. FedCom admins: TRM revenue data ONLY (never bands) —
+         mirrors canEditLaneData in the UI (v2.13.0 FedCom parity). */
+      allow create: if isCompanyUser() && (hasPerm('integrity.bands', isPricing())
+        || hasPerm('integrity.trm', isPricing() || isFedCom()));
+      allow update: if isCompanyUser() && (
+        (hasPerm('integrity.bands', isPricing()) && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['trm']))
+        || (hasPerm('integrity.trm', isPricing() || isFedCom()) && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['bands']))
+        || (hasPerm('integrity.bands', isPricing()) && hasPerm('integrity.trm', isPricing() || isFedCom())));
+      allow delete: if false;
+      match /bandHistory/{entryId} {
+        allow read: if isCompanyUser();
+        allow create: if isCompanyUser() && hasPerm('integrity.bands', isPricing());
+        allow update, delete: if false;
+      }
+    }
+    match /integrityMeta/{docId} {
+      allow read: if isCompanyUser();
+      allow write: if isCompanyUser() && hasPerm('integrity.trm', isPricing() || isFedCom());
+    }
+
+    // Lanes / planning data: pricing tier + FedCom admins (v2.11.3 — the
+    // Integrity ✎ is the single place lane data gets edited). v2.17.0:
+    // bookers may CREATE extras lanes (never in the main FA2D3 schedule);
+    // editing and removing lanes stays with the lane editors.
+    match /lanes/{laneId} {
+      allow read: if isCompanyUser();
+      allow create: if isCompanyUser() && (hasPerm('integrity.lanes', isPricing() || isFedCom())
+        || (hasPerm('matrix.addLane', isBooker())
+            && request.resource.data.section != 'FA2D3 Schedule'));
+      allow update, delete: if isCompanyUser() && hasPerm('integrity.lanes', isPricing() || isFedCom());
+      /* narrow lane writes (Caleb 07/14): global drag-reorder (sortOrder +
+         section adoption on cross-section drops) and ⓘ service notes */
+      allow update: if isCompanyUser()
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['sortOrder', 'section'].toSet())
+        && hasPerm('matrix.reorder', false);
+      allow update: if isCompanyUser()
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['serviceNotes'].toSet())
+        && hasPerm('matrix.serviceNotes', isAdminTier() || isPricing() || isQa());
+    }
+
+    // Loads. Asset Reps stay GHL-scoped regardless of overrides; every other
+    // capability honors allow/deny.
+    match /loads/{loadId} {
+      allow read: if isCompanyUser();
+      allow create: if isCompanyUser() && (
+        (!isAssetRep() && hasPerm('matrix.create', isBooker()) && createApprovalOk())
+        || (isAssetRep() && hasPerm('matrix.create', true)
+            && laneOpenToAsset(request.resource.data.laneId)
+            && (request.resource.data.carrier == '' || isGhCarrier(request.resource.data.carrier))
+            && createApprovalOk()));
+      allow update: if isCompanyUser() && (
+        // Booking path FIRST — the hottest write; keeps evaluation shallow
+        (!isAssetRep() && hasPerm('matrix.book', isBooker())
+            && bookerKeysOnly() && bookerApprovalOk() && chargebackOk()
+            && (noChargebackKeys() || hasPerm('matrix.chargebackLog', isBooker())))
+        // Admin-tier full write — still subject to explicit denies
+        || (isAdminTier() && !denyP('matrix.book') && adminDeniesOk())
+        // QA: BOL verification keys only
+        || (hasPerm('qa.verify', isQa()) && request.resource.data.diff(resource.data).affectedKeys().hasOnly(
+              ['bolVerified', 'bolVerifiedBy', 'bolVerifiedAt', 'history']))
+        // Asset path: always lane- and carrier-scoped
+        || (isAssetRep() && hasPerm('matrix.book', true)
+            && bookerKeysOnly() && bookerApprovalOk() && noChargebackKeys()
+            && laneOpenToAsset(request.resource.data.laneId)
+            && (resource.data.carrier == '' || isGhCarrier(resource.data.carrier))
+            && (request.resource.data.carrier == '' || isGhCarrier(request.resource.data.carrier)))
+        // Standalone grants (explicit allow on a non-admin)
+        /* v2.20.0: lane-data editors cascade the Loading default into
+           future loads — equipment (+history) only */
+        || (hasPerm('integrity.lanes', isPricing() || isFedCom())
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['equipment', 'history']))
+        /* Loadout Trailer team (07/15): entry + returns; exceptions need approve */
+        || (hasPerm('trailers.mark', false) && request.resource.data.diff(resource.data).affectedKeys().hasOnly(
+              ['trailerNumber', 'trailerReturnedAt', 'trailerNotes', 'history'].toSet()))
+        || (hasPerm('trailers.approve', false) && request.resource.data.diff(resource.data).affectedKeys().hasOnly(
+              ['trailerNumber', 'trailerReturnSite', 'trailerFreeDays', 'trailerReturnedAt', 'trailerNotes',
+               'trailerBilledDays', 'trailerBilledAt', 'trailerFineOverride', 'history'].toSet()))
+        || (hasPerm('hub.fields', false) && hubFieldKeysOnly())
+        || (hasPerm('hub.board', false) && boardKeysOnly())
+        || (hasPerm('hub.approve', false) && approveKeysOnly())
+        || (hasPerm('admin.chargebacks.decide', false) && cbDecisionKeysOnly()));
+      /* v2.19.0: bookers delete loads — required by the same-lane move
+         (create-new-day + delete-old-day); bookers could already blank every
+         field, so this is not a materially higher privilege. Asset reps
+         stay excluded (isBooker). */
+      allow delete: if isCompanyUser() && hasPerm('matrix.book', isBooker());
+    }
+
+    // Carrier database: bookers add/backfill while booking; the carrier-DB
+    // editors (Integrity → Carriers) hold 'integrity.carriers'.
+    // Rate confirmations (07/16): created/updated ONLY by Cloud Functions
+    // (admin SDK bypasses rules); company users may read the register.
+    match /rateCons/{rcId} {
+      allow read: if isCompanyUser();
+      allow write: if false;
+    }
+
+    // T&T facility contact directory (Phase 1) — replaces the CT spreadsheet.
+    match /facilities/{facilityId} {
+      allow read: if isCompanyUser();
+      allow create, update: if isBooker();
+      allow delete: if isAdminTier();
+    }
+
+    match /carriers/{carrierId} {
+      allow read: if isCompanyUser();
+      allow create: if isCompanyUser() && hasPerm('matrix.book', isBooker());
+      allow update: if isCompanyUser() && (hasPerm('matrix.book', isBooker())
+        || hasPerm('integrity.carriers', isAdminTier() || isPricing()));
+      allow delete: if false;
+    }
+
+    /* Users & provisioning. Self-registration lands at Base; the owner email
+       bootstraps as owner. Provisioners may only move users within their own
+       grantable set (§2.3) and never touch themselves. FedCom is owner-set.
+       v2.11: permAllow/permDeny are OWNER-ONLY (the owner branch) — every
+       other branch is key-restricted and cannot touch them. */
+    match /users/{uid} {
+      allow read: if isCompanyUser();
+      allow create: if isCompanyUser()
+        && request.auth.uid == uid
+        && request.resource.data.email == request.auth.token.email
+        && (request.resource.data.role == 'base'
+            || (request.resource.data.role == 'owner' && request.auth.token.email == 'caleb@ghlogisticsllc.com'));
+      /* Morale badge: users may set ONLY their own team fields. The owner may
+         additionally check their OWN 🏈 box (the provisioning branch below
+         requires auth.uid != uid, so self-writes need this carve-out). */
+      allow update: if isCompanyUser() && request.auth.uid == uid
+        && (
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['team', 'teamLogoUrl'].toSet())
+          || (normRole() == 'owner'
+              && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['team', 'teamLogoUrl', 'moraleOk'].toSet()))
+        );
+      allow update: if isCompanyUser() && request.auth.uid != uid && (
+        normRole() == 'owner'
+        /* §8.2: FedCom admins set per-rep daily goals */
+        || (isFedCom()
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['dailyGoal']))
+        /* v2.18.0 (Caleb): FedCom admins provision up to Admin / Asset Admin —
+           never the pricing tier, never the FedCom tag, never the owner. */
+        || (isFedCom()
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['role', 'permAllow', 'permDeny'].toSet())
+            && resource.data.role in ['base', 'broker_rep', 'asset_rep', 'qa_manager', 'qa_rep', 'trailer_manager', 'trailer_rep', 'admin', 'asset_admin']
+            && request.resource.data.role in ['base', 'broker_rep', 'asset_rep', 'qa_manager', 'qa_rep', 'trailer_manager', 'trailer_rep', 'admin', 'asset_admin'])
+        || (
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['role', 'fedCom', 'permAllow', 'permDeny'].toSet())
+          && request.resource.data.fedCom != true
+          && (
+            (normRole() == 'pricing_manager'
+              && resource.data.role in ['base', 'pricing_rep', 'broker_rep']
+              && request.resource.data.role in ['base', 'pricing_rep', 'broker_rep'])
+            || (normRole() == 'admin'
+              && resource.data.role in ['base', 'broker_rep']
+              && request.resource.data.role in ['base', 'broker_rep'])
+            || (normRole() == 'asset_admin'
+              && resource.data.role in ['base', 'asset_rep']
+              && request.resource.data.role in ['base', 'asset_rep'])
+          )
+        )
+      );
+      allow delete: if false;
+    }
+  }
+}

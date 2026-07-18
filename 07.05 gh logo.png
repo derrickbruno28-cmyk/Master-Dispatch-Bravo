@@ -1,0 +1,18 @@
+{
+  "projects": {
+    "default": "bravo-matrix-gh"
+  },
+  "targets": {
+    "bravo-matrix-gh": {
+      "hosting": {
+        "app": [
+          "bravo-matrix-gh"
+        ],
+        "loadboard": [
+          "ghl-loadboard"
+        ]
+      }
+    }
+  },
+  "etags": {}
+}
