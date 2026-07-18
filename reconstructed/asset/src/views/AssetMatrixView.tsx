@@ -1,5 +1,5 @@
-import { useMemo, useState } from 'react';
-import { TRUCKS, TERMINALS, TERMINAL_LABELS, type Truck } from '../data/fleet';
+import { useEffect, useMemo, useState } from 'react';
+import { TRUCKS, TERMINALS, TERMINAL_LABELS, ROUTES, type Truck } from '../data/fleet';
 
 /* Asset Matrix — the Bravo-format scheduling board for our OWN trucks.
    Rows = trucks grouped by home terminal (SA / Dallas / Memphis / Houston);
@@ -45,10 +45,30 @@ function seed(): Record<string, Assignment> {
   return out;
 }
 
+/* Persistence: for the demo the board saves to the browser (survives reload).
+   Phase 3 swaps this storage layer for the SHARED Firestore so assignments are
+   multi-user and USPS ones coincide with Bravo — the component logic stays. */
+const STORAGE_KEY = 'asset-matrix-v1';
+function loadInitial(): Record<string, Assignment> {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (raw) return JSON.parse(raw) as Record<string, Assignment>;
+  } catch { /* ignore bad/blocked storage */ }
+  return seed();
+}
+
+/* Real USPS routes from the fleet data feed the cell picker. */
+const ROUTE_OPTIONS = ROUTES.map((r) => r.route);
+function looksUSPS(s: string) { return /FA2D3|FA28D|7523D|HCR/i.test(s); }
+
 export default function AssetMatrixView() {
   const [weekStart, setWeekStart] = useState<Date>(() => mondayOf(new Date()));
-  const [assign, setAssign] = useState<Record<string, Assignment>>(seed);
+  const [assign, setAssign] = useState<Record<string, Assignment>>(loadInitial);
   const [editing, setEditing] = useState<string | null>(null);
+
+  useEffect(() => {
+    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(assign)); } catch { /* ignore */ }
+  }, [assign]);
 
   const dates = useMemo(
     () => DAYS.map((_, i) => isoDate(addDays(weekStart, i))),
@@ -164,15 +184,20 @@ function CellEditor({ init, onSave, onCancel }: { init?: Assignment; onSave: (a:
   const [route, setRoute] = useState(init?.route ?? '');
   const [status, setStatus] = useState<Status>(init?.status ?? 'covered');
   const [usps, setUsps] = useState(init?.usps ?? true);
+  const [uspsTouched, setUspsTouched] = useState(false);
+  /* auto-flag USPS when the picked route looks like a contract trip, until the
+     dispatcher overrides the checkbox by hand */
+  function changeRoute(v: string) { setRoute(v); if (!uspsTouched) setUsps(looksUSPS(v)); }
   return (
     <div className="am-editor" onClick={(e) => e.stopPropagation()}>
-      <input className="am-input" autoFocus placeholder="Route / load (e.g. FA2D3-544)" value={route}
-        onChange={(e) => setRoute(e.target.value)}
+      <input className="am-input" autoFocus list="am-routes" placeholder="Pick or type a route…" value={route}
+        onChange={(e) => changeRoute(e.target.value)}
         onKeyDown={(e) => { if (e.key === 'Enter') onSave({ route, status, usps }); if (e.key === 'Escape') onCancel(); }} />
+      <datalist id="am-routes">{ROUTE_OPTIONS.map((r) => <option key={r} value={r} />)}</datalist>
       <select className="am-input" value={status} onChange={(e) => setStatus(e.target.value as Status)}>
         {STATUSES.map((s) => <option key={s} value={s}>{STATUS_LABEL[s]}</option>)}
       </select>
-      <label className="am-usps-check"><input type="checkbox" checked={usps} onChange={(e) => setUsps(e.target.checked)} /> USPS contract route</label>
+      <label className="am-usps-check"><input type="checkbox" checked={usps} onChange={(e) => { setUsps(e.target.checked); setUspsTouched(true); }} /> USPS contract route</label>
       <div className="am-editor-btns">
         <button className="am-save" onClick={() => onSave({ route, status, usps })}>Save</button>
         <button className="am-clear" onClick={() => onSave({ route: '', status, usps })}>Clear</button>
