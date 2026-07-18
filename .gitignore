@@ -1,0 +1,12 @@
+# dependencies / build output
+node_modules/
+dist/
+*.log
+
+# local env (Firebase web config — recreate via `firebase apps:sdkconfig`)
+.env.local
+.env.*.local
+
+# OS noise
+.DS_Store
+Thumbs.db
