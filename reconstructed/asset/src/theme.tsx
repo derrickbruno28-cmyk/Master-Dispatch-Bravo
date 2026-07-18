@@ -25,22 +25,28 @@ const ThemeContext = createContext<{
   setPalette: (p: PaletteKey) => void;
 }>({ theme: 'dark', toggle: () => {}, palette: 'bravo', setPalette: () => {} });
 
+/* storage guarded so a sandboxed iframe (no same-origin) can't crash the app */
+const ls = {
+  get(k: string): string | null { try { return ls.get(k); } catch { return null; } },
+  set(k: string, v: string) { try { ls.set(k, v); } catch { /* sandboxed */ } },
+};
+
 export function ThemeProvider({ children }: { children: ReactNode }) {
   const [theme, setTheme] = useState<Theme>(
-    () => (localStorage.getItem('bravo-theme') as Theme) || 'dark',
+    () => (ls.get('bravo-theme') as Theme) || 'dark',
   );
   const [palette, setPalette] = useState<PaletteKey>(
-    () => (localStorage.getItem('bravo-palette') as PaletteKey) || 'bravo',
+    () => (ls.get('bravo-palette') as PaletteKey) || 'bravo',
   );
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
-    localStorage.setItem('bravo-theme', theme);
+    ls.set('bravo-theme', theme);
   }, [theme]);
 
   useEffect(() => {
     document.documentElement.dataset.palette = palette;
-    localStorage.setItem('bravo-palette', palette);
+    ls.set('bravo-palette', palette);
   }, [palette]);
 
   return (
