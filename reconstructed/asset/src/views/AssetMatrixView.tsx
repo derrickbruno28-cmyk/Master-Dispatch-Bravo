@@ -65,6 +65,7 @@ export default function AssetMatrixView() {
   const [weekStart, setWeekStart] = useState<Date>(() => mondayOf(new Date()));
   const [assign, setAssign] = useState<Record<string, Assignment>>(loadInitial);
   const [editing, setEditing] = useState<string | null>(null);
+  const [termFilter, setTermFilter] = useState<string>('ALL');
 
   useEffect(() => {
     try { localStorage.setItem(STORAGE_KEY, JSON.stringify(assign)); } catch { /* ignore */ }
@@ -74,6 +75,15 @@ export default function AssetMatrixView() {
     () => DAYS.map((_, i) => isoDate(addDays(weekStart, i))),
     [weekStart],
   );
+  const shownTerminals: string[] = termFilter === 'ALL' ? [...TERMINALS] : [termFilter];
+  /* per-day assignment counts across the visible terminals + a week total */
+  const dayCounts = useMemo(
+    () => dates.map((d) => TRUCKS.filter((t) => shownTerminals.includes(t.homeCity))
+      .reduce((n, t) => n + (assign[key(t.tractor, d)] ? 1 : 0), 0)),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [dates, assign, termFilter],
+  );
+  const weekTotal = dayCounts.reduce((a, b) => a + b, 0);
   const byTerminal = useMemo(() => {
     const m: Record<string, Truck[]> = {};
     for (const term of TERMINALS) m[term] = [];
@@ -102,6 +112,14 @@ export default function AssetMatrixView() {
           <button className="am-navbtn" onClick={() => setWeekStart(addDays(weekStart, 7))}>›</button>
           <button className="am-today" onClick={() => setWeekStart(mondayOf(new Date()))}>Today</button>
         </div>
+        <div className="am-termfilter">
+          {(['ALL', ...TERMINALS] as string[]).map((t) => (
+            <button key={t} className={`am-tchip ${termFilter === t ? 'on' : ''}`} onClick={() => setTermFilter(t)}>
+              {t === 'ALL' ? 'All terminals' : (TERMINAL_LABELS[t] ?? t)}
+            </button>
+          ))}
+          <span className="am-muted">{weekTotal} assigned this week</span>
+        </div>
         <div className="am-legend">
           {STATUSES.map((s) => (
             <span key={s} className="am-legend-item">
@@ -120,12 +138,13 @@ export default function AssetMatrixView() {
               {DAYS.map((d, i) => (
                 <th key={d} className="am-daycol">
                   {d}<span className="am-datesub">{dates[i].slice(5)}</span>
+                  {dayCounts[i] > 0 && <span className="am-daycount">{dayCounts[i]}</span>}
                 </th>
               ))}
             </tr>
           </thead>
           <tbody>
-            {TERMINALS.map((term) => (
+            {shownTerminals.map((term) => (
               <TerminalRows
                 key={term}
                 term={term}
