@@ -163,3 +163,10 @@
 /* Routes Covered */
 .cov-sec { display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 700; margin-bottom: 8px; }
 .cov-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+
+/* Optimizer → Matrix assign */
+.opt-date { display: flex; align-items: center; gap: 6px; }
+.opt-date input { padding: 4px 8px; max-width: 150px; }
+.opt-assign { background: var(--accent); color: #fff; border: none; border-radius: 6px; padding: 4px 10px; font: inherit; font-size: 11px; font-weight: 700; cursor: pointer; white-space: nowrap; }
+.opt-assign:hover { filter: brightness(1.1); }
+.opt-assign-note { background: rgba(16,212,142,0.12); border: 1px solid rgba(16,212,142,0.3); color: var(--green); border-radius: 8px; padding: 8px 12px; font-size: 12px; margin-bottom: 10px; }

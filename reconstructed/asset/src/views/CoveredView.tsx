@@ -1,12 +1,10 @@
 import { useMemo, useState } from 'react';
 import { TRUCKS } from '../data/fleet';
+import { loadAssignments, parseCellKey } from '../data/schedule';
 
 /* Routes Covered — DERIVED live from the Asset Matrix assignments (Bravo's
    pattern: the board is the system of record, roll-ups read from it — no
    separate data entry). Splits USPS contract routes from other freight. */
-
-interface Assignment { route: string; status: string; usps: boolean }
-const MATRIX_KEY = 'asset-matrix-v1'; // must match AssetMatrixView STORAGE_KEY
 
 interface Row { tractor: string; date: string; route: string; status: string; usps: boolean; driver: string; terminal: string }
 
@@ -17,15 +15,12 @@ const STATUS_COLOR: Record<string, string> = {
 const COVERED = new Set(['covered', 'dispatched', 'departed', 'delivered']);
 
 function loadRows(): Row[] {
-  let data: Record<string, Assignment> = {};
-  try { const raw = localStorage.getItem(MATRIX_KEY); if (raw) data = JSON.parse(raw) as Record<string, Assignment>; } catch { /* ignore */ }
+  const data = loadAssignments();
   const byId = new Map(TRUCKS.map((t) => [t.tractor, t]));
   const rows: Row[] = [];
   for (const [k, a] of Object.entries(data)) {
     if (!a.route?.trim()) continue;
-    const u = k.indexOf('_');
-    const tractor = k.slice(0, u);
-    const date = k.slice(u + 1);
+    const { tractor, date } = parseCellKey(k);
     const t = byId.get(tractor);
     rows.push({ tractor, date, route: a.route, status: a.status, usps: !!a.usps, driver: t ? [t.driver1, t.driver2].filter(Boolean).join(' · ') : '', terminal: t?.homeCity ?? '' });
   }

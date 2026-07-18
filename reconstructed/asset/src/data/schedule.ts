@@ -1,0 +1,103 @@
+/* Asset Matrix schedule — the ONE data layer every view reads/writes through.
+
+   Backend seam for going team-wide:
+   - DEMO (no Firebase config): assignments live in the browser (localStorage),
+     which is what runs today.
+   - LIVE (Firebase configured — firebaseEnabled): every write also goes to the
+     SHARED Firestore `assetSchedule` collection, so the board is multi-user.
+     USPS assignments additionally mirror into Bravo's `loads` as status:'asset'
+     (see mirrorToBravo) so a contract-truck assignment shows in BOTH apps —
+     the "coincide" mechanism. Flipping this on is a config step (an app/.env.local
+     with the Firebase web config); the code path below is ready for it. */
+
+import { db, firebaseEnabled } from '../firebase';
+import { deleteDoc, doc, onSnapshot, setDoc, collection } from 'firebase/firestore';
+
+export interface Assignment { route: string; status: string; usps: boolean }
+
+export const cellKey = (tractor: string, date: string) => `${tractor}_${date}`;
+export function parseCellKey(k: string): { tractor: string; date: string } {
+  const i = k.indexOf('_');
+  return { tractor: k.slice(0, i), date: k.slice(i + 1) };
+}
+
+/* ---- date helpers (shared so the grid + seed key loads to the same day) ---- */
+export function isoDate(d: Date) { return d.toISOString().slice(0, 10); }
+export function mondayOf(d: Date) { const x = new Date(d); const dow = (x.getDay() + 6) % 7; x.setDate(x.getDate() - dow); return x; }
+export function addDays(d: Date, n: number) { const x = new Date(d); x.setDate(x.getDate() + n); return x; }
+
+const LS_KEY = 'asset-matrix-v1';
+
+function readLocal(): Record<string, Assignment> {
+  try { const raw = localStorage.getItem(LS_KEY); if (raw) return JSON.parse(raw) as Record<string, Assignment>; } catch { /* ignore */ }
+  return {};
+}
+function writeLocal(map: Record<string, Assignment>) {
+  try { localStorage.setItem(LS_KEY, JSON.stringify(map)); } catch { /* ignore */ }
+}
+
+/* Demo seed so the board isn't empty on first run. */
+function seed(): Record<string, Assignment> {
+  const out: Record<string, Assignment> = {};
+  const mon = mondayOf(new Date());
+  const put = (tractor: string, dayIdx: number, a: Assignment) => { out[cellKey(tractor, isoDate(addDays(mon, dayIdx)))] = a; };
+  put('447', 0, { route: 'FA2D3-1 Coppell→Memphis', status: 'dispatched', usps: true });
+  put('456', 1, { route: 'FA2D3-544 Irving→SATX', status: 'covered', usps: true });
+  put('758', 2, { route: '16193 Opa-Irv', status: 'departed', usps: false });
+  put('958', 0, { route: 'FA2D3-354 Memphis→Nashville', status: 'covered', usps: true });
+  put('444', 3, { route: '34hr reset — Houston', status: 'off', usps: false });
+  return out;
+}
+
+/* Persist the seed once so all views (Matrix, Covered) see the same demo data. */
+export function ensureSeed() {
+  const cur = readLocal();
+  if (Object.keys(cur).length === 0) writeLocal(seed());
+}
+
+export function loadAssignments(): Record<string, Assignment> { return readLocal(); }
+
+/* Single write path. Updates the browser copy (demo) and, when live, the shared
+   Firestore collection + Bravo mirror. Pass a null/blank assignment to clear. */
+export async function setAssignment(tractor: string, date: string, a: Assignment | null) {
+  const map = readLocal();
+  const k = cellKey(tractor, date);
+  const clear = !a || !a.route.trim();
+  if (clear) delete map[k]; else map[k] = a!;
+  writeLocal(map);
+
+  if (firebaseEnabled && db) {
+    try {
+      const ref = doc(db, 'assetSchedule', k);
+      if (clear) await deleteDoc(ref);
+      else await setDoc(ref, { tractor, date, ...a });
+      await mirrorToBravo(tractor, date, clear ? null : a!);
+    } catch (e) {
+      console.error('assetSchedule write failed', e);
+    }
+  }
+}
+
+/* LIVE-only: mirror a USPS asset assignment into Bravo's shared `loads` as
+   status:'asset' so it appears on the Bravo Matrix too. Requires resolving the
+   route's FA2D3 trip code to a Bravo laneId (lookup against the shared `lanes`
+   collection) — wired at go-live once both apps point at the same project. */
+async function mirrorToBravo(tractor: string, date: string, a: Assignment | null) {
+  if (!firebaseEnabled || !db) return;
+  if (!a || !a.usps) return; // only contract routes coincide with Bravo
+  // TODO(go-live): const laneId = await lookupLaneByTripCode(tripCodeOf(a.route));
+  //   then setDoc(doc(db,'loads',`${laneId}_${date}`), { status:'asset', carrier:'GH Logistics', truckNumber: tractor, ... })
+  //   Left documented (not executed) so the demo never touches Bravo's data.
+  void tractor; void date; void collection;
+}
+
+/* LIVE subscription for a team-wide board (onSnapshot). Components use
+   loadAssignments() in demo; wire this when Firebase is configured. */
+export function subscribeAssignments(cb: (map: Record<string, Assignment>) => void): () => void {
+  if (!firebaseEnabled || !db) { cb(readLocal()); return () => {}; }
+  return onSnapshot(collection(db, 'assetSchedule'), (snap) => {
+    const map: Record<string, Assignment> = {};
+    snap.forEach((d) => { const v = d.data() as Assignment & { tractor: string; date: string }; map[d.id] = { route: v.route, status: v.status, usps: v.usps }; });
+    cb(map);
+  });
+}

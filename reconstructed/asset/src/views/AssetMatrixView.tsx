@@ -1,85 +1,42 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { TRUCKS, TERMINALS, TERMINAL_LABELS, ROUTES, type Truck } from '../data/fleet';
+import {
+  loadAssignments, setAssignment, ensureSeed, cellKey, parseCellKey,
+  isoDate, mondayOf, addDays, type Assignment,
+} from '../data/schedule';
 
 /* Asset Matrix — the Bravo-format scheduling board for our OWN trucks.
    Rows = trucks grouped by home terminal (SA / Dallas / Memphis / Houston);
-   columns = days Mon→Sun, left→right; every cell is an editable assignment
-   (route/load + status, flagged USPS or not). In-memory for the demo; Phase 2
-   persists each cell to the SHARED Firestore as a status:'asset' load so a USPS
-   assignment shows in Bravo automatically (the "coincide" mechanism). */
+   columns = days Mon→Sun, left→right; every cell is an editable assignment.
+   All reads/writes go through data/schedule (browser today, shared Firestore
+   when configured — USPS assignments then coincide with Bravo). */
 
 type Status = 'open' | 'covered' | 'dispatched' | 'departed' | 'delivered' | 'off';
 const STATUSES: Status[] = ['open', 'covered', 'dispatched', 'departed', 'delivered', 'off'];
-const STATUS_COLOR: Record<Status, string> = {
-  open: 'var(--muted)',
-  covered: 'var(--green)',
-  dispatched: '#00b8d4',
-  departed: 'var(--accent)',
-  delivered: '#6b7f9e',
-  off: 'var(--panel-2)',
+const STATUS_COLOR: Record<string, string> = {
+  open: 'var(--muted)', covered: 'var(--green)', dispatched: '#00b8d4',
+  departed: 'var(--accent)', delivered: '#6b7f9e', off: 'var(--panel-2)',
 };
-const STATUS_LABEL: Record<Status, string> = {
+const STATUS_LABEL: Record<string, string> = {
   open: 'Open', covered: 'Covered', dispatched: 'Dispatched',
   departed: 'Departed', delivered: 'Delivered', off: 'Off / Home',
 };
 
-interface Assignment { route: string; status: Status; usps: boolean }
 const DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-
-/* Monday-anchored week (local). Phase 3 swaps this for Bravo's Central/UTC
-   dates.ts helpers so both boards key loads to the exact same day. */
-function isoDate(d: Date) { return d.toISOString().slice(0, 10); }
-function mondayOf(d: Date) { const x = new Date(d); const dow = (x.getDay() + 6) % 7; x.setDate(x.getDate() - dow); return x; }
-function addDays(d: Date, n: number) { const x = new Date(d); x.setDate(x.getDate() + n); return x; }
-const key = (tractor: string, date: string) => `${tractor}_${date}`;
-
-function seed(): Record<string, Assignment> {
-  const out: Record<string, Assignment> = {};
-  const mon = mondayOf(new Date());
-  const put = (tractor: string, dayIdx: number, a: Assignment) => { out[key(tractor, isoDate(addDays(mon, dayIdx)))] = a; };
-  put('447', 0, { route: 'FA2D3-1 Coppell→Memphis', status: 'dispatched', usps: true });
-  put('456', 1, { route: 'FA2D3-544 Irving→SATX', status: 'covered', usps: true });
-  put('758', 2, { route: '16193 Opa-Irv', status: 'departed', usps: false });
-  put('958', 0, { route: 'FA2D3-354 Memphis→Nashville', status: 'covered', usps: true });
-  put('444', 3, { route: '34hr reset — Houston', status: 'off', usps: false });
-  return out;
-}
-
-/* Persistence: for the demo the board saves to the browser (survives reload).
-   Phase 3 swaps this storage layer for the SHARED Firestore so assignments are
-   multi-user and USPS ones coincide with Bravo — the component logic stays. */
-const STORAGE_KEY = 'asset-matrix-v1';
-function loadInitial(): Record<string, Assignment> {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (raw) return JSON.parse(raw) as Record<string, Assignment>;
-  } catch { /* ignore bad/blocked storage */ }
-  return seed();
-}
-
-/* Real USPS routes from the fleet data feed the cell picker. */
 const ROUTE_OPTIONS = ROUTES.map((r) => r.route);
 function looksUSPS(s: string) { return /FA2D3|FA28D|7523D|HCR/i.test(s); }
 
 export default function AssetMatrixView() {
   const [weekStart, setWeekStart] = useState<Date>(() => mondayOf(new Date()));
-  const [assign, setAssign] = useState<Record<string, Assignment>>(loadInitial);
+  const [assign, setAssign] = useState<Record<string, Assignment>>(() => { ensureSeed(); return loadAssignments(); });
   const [editing, setEditing] = useState<string | null>(null);
   const [termFilter, setTermFilter] = useState<string>('ALL');
 
-  useEffect(() => {
-    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(assign)); } catch { /* ignore */ }
-  }, [assign]);
-
-  const dates = useMemo(
-    () => DAYS.map((_, i) => isoDate(addDays(weekStart, i))),
-    [weekStart],
-  );
+  const dates = useMemo(() => DAYS.map((_, i) => isoDate(addDays(weekStart, i))), [weekStart]);
   const shownTerminals: string[] = termFilter === 'ALL' ? [...TERMINALS] : [termFilter];
-  /* per-day assignment counts across the visible terminals + a week total */
   const dayCounts = useMemo(
     () => dates.map((d) => TRUCKS.filter((t) => shownTerminals.includes(t.homeCity))
-      .reduce((n, t) => n + (assign[key(t.tractor, d)] ? 1 : 0), 0)),
+      .reduce((n, t) => n + (assign[cellKey(t.tractor, d)] ? 1 : 0), 0)),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [dates, assign, termFilter],
   );
@@ -94,12 +51,11 @@ export default function AssetMatrixView() {
   const weekLabel = `${weekStart.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} – ${addDays(weekStart, 6).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}`;
 
   function save(k: string, a: Assignment) {
-    setAssign((prev) => {
-      const next = { ...prev };
-      if (!a.route.trim()) delete next[k]; else next[k] = a;
-      return next;
-    });
+    const { tractor, date } = parseCellKey(k);
+    const clear = !a.route.trim();
+    setAssign((prev) => { const next = { ...prev }; if (clear) delete next[k]; else next[k] = a; return next; });
     setEditing(null);
+    void setAssignment(tractor, date, clear ? null : a);
   }
 
   return (
@@ -179,7 +135,7 @@ function TerminalRows({ term, trucks, dates, assign, editing, setEditing, save }
             <div className="am-ttype">{t.type}</div>
           </td>
           {dates.map((d) => {
-            const k = key(t.tractor, d);
+            const k = cellKey(t.tractor, d);
             const a = assign[k];
             if (editing === k) return <td key={d} className="am-cell"><CellEditor init={a} onSave={(x) => save(k, x)} onCancel={() => setEditing(null)} /></td>;
             return (
@@ -187,7 +143,7 @@ function TerminalRows({ term, trucks, dates, assign, editing, setEditing, save }
                 {a ? (
                   <div className="am-assign" style={{ borderLeftColor: STATUS_COLOR[a.status] }}>
                     <div className="am-route">{a.route}{a.usps && <span className="am-usps">USPS</span>}</div>
-                    <div className="am-status" style={{ color: STATUS_COLOR[a.status] }}>{STATUS_LABEL[a.status]}</div>
+                    <div className="am-status" style={{ color: STATUS_COLOR[a.status] }}>{STATUS_LABEL[a.status] ?? a.status}</div>
                   </div>
                 ) : <span className="am-add">+</span>}
               </td>
@@ -201,11 +157,9 @@ function TerminalRows({ term, trucks, dates, assign, editing, setEditing, save }
 
 function CellEditor({ init, onSave, onCancel }: { init?: Assignment; onSave: (a: Assignment) => void; onCancel: () => void }) {
   const [route, setRoute] = useState(init?.route ?? '');
-  const [status, setStatus] = useState<Status>(init?.status ?? 'covered');
+  const [status, setStatus] = useState<Status>((init?.status as Status) ?? 'covered');
   const [usps, setUsps] = useState(init?.usps ?? true);
   const [uspsTouched, setUspsTouched] = useState(false);
-  /* auto-flag USPS when the picked route looks like a contract trip, until the
-     dispatcher overrides the checkbox by hand */
   function changeRoute(v: string) { setRoute(v); if (!uspsTouched) setUsps(looksUSPS(v)); }
   return (
     <div className="am-editor" onClick={(e) => e.stopPropagation()}>

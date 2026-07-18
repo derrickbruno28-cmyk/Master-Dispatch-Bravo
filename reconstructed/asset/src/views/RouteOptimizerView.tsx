@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import { TRUCKS } from '../data/fleet';
 import { getMatches, type Match } from '../data/optimize';
+import { setAssignment, isoDate } from '../data/schedule';
 
 /* Route Optimizer — ported from the Operations Center onto the shared
    foundation. Pick a truck → the USPS routes it can cover, ranked by deadhead
@@ -13,6 +14,8 @@ export default function RouteOptimizerView() {
   const [radius, setRadius] = useState(250);
   const [homeward, setHomeward] = useState(false);
   const [q, setQ] = useState('');
+  const [assignDate, setAssignDate] = useState(isoDate(new Date()));
+  const [note, setNote] = useState('');
 
   const truck = useMemo(() => TRUCKS.find((t) => t.tractor === tractor), [tractor]);
   const trucks = useMemo(() => {
@@ -26,6 +29,14 @@ export default function RouteOptimizerView() {
     m.sort((a, b) => (homeward ? b.hw - a.hw || a.dh - b.dh : a.dh - b.dh || b.hw - a.hw));
     return m;
   }, [truck, radius, homeward]);
+
+  /* Assign a route straight onto the Asset Matrix (shared schedule) for the
+     chosen truck + day — it shows up on the Matrix and Routes Covered. */
+  function assign(m: Match) {
+    if (!truck) return;
+    void setAssignment(truck.tractor, assignDate, { route: m.route, status: 'covered', usps: true });
+    setNote(`✓ Assigned ${m.route} to #${truck.tractor} on ${assignDate} — see it on the Asset Matrix.`);
+  }
 
   return (
     <div className="am-page">
@@ -68,9 +79,11 @@ export default function RouteOptimizerView() {
                     <button key={r} className={`opt-chip ${radius === r ? 'on' : ''}`} onClick={() => setRadius(r)}>{r}mi</button>
                   ))}
                 </div>
+                <label className="opt-date"><span className="am-muted">Assign to</span><input type="date" className="am-input" value={assignDate} onChange={(e) => setAssignDate(e.target.value)} /></label>
                 <label className="am-usps-check"><input type="checkbox" checked={homeward} onChange={(e) => setHomeward(e.target.checked)} /> Prefer homeward</label>
                 <span className="am-muted">{matches.length} routes</span>
               </div>
+              {note && <div className="opt-assign-note">{note}</div>}
 
               {matches.length === 0 ? (
                 <p className="am-muted">No routes within {radius} mi deadhead of {truck.currentCity}. Try a wider radius.</p>
@@ -79,7 +92,7 @@ export default function RouteOptimizerView() {
                   <table className="am-grid opt-table">
                     <thead>
                       <tr>
-                        <th>Deadhead</th><th>Route</th><th>Loaded mi</th><th>Rate</th><th>Est. hrs</th><th>Homeward</th><th>Fits HOS</th>
+                        <th>Deadhead</th><th>Route</th><th>Loaded mi</th><th>Rate</th><th>Est. hrs</th><th>Homeward</th><th>Fits HOS</th><th></th>
                       </tr>
                     </thead>
                     <tbody>
@@ -92,6 +105,7 @@ export default function RouteOptimizerView() {
                           <td>{m.hrs}h</td>
                           <td>{m.hw > 0 ? <span className="opt-hw"><span className="opt-hw-bar" style={{ width: `${m.hw}%` }} />{m.hw}%</span> : <span className="am-muted">—</span>}</td>
                           <td>{m.ok ? <span style={{ color: 'var(--green)' }}>✓</span> : <span style={{ color: 'var(--red)' }}>over</span>}</td>
+                          <td><button className="opt-assign" onClick={() => assign(m)}>Assign →</button></td>
                         </tr>
                       ))}
                     </tbody>
