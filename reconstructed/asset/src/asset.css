@@ -270,3 +270,7 @@
 .opt-sel-cur b { color: var(--accent); }
 .opt-dest { font-size: 11.5px; }
 .opt-dest b { color: var(--accent); }
+
+/* ---- Route Optimizer: pickup-here badge + PU time ---- */
+.opt-dh-here { font-size: 9.5px; font-weight: 800; color: var(--green); background: rgba(16,212,142,0.14); border: 1px solid rgba(16,212,142,0.4); border-radius: 4px; padding: 1px 6px; white-space: nowrap; }
+.opt-putime { font-variant-numeric: tabular-nums; color: var(--text); }

@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { loadFleet } from '../data/fleetStore';
-import { getMatches, parseRoute, type Match } from '../data/optimize';
+import { getMatches, parseRoute, tripCode, type Match } from '../data/optimize';
 import { setAssignment, isoDate, loadAssignments, parseCellKey, driverConflicts } from '../data/schedule';
 
 /* Route Optimizer — ported from the Operations Center onto the shared
@@ -84,7 +84,7 @@ export default function RouteOptimizerView() {
     <div className="am-page">
       <div className="am-head">
         <h2>Route Optimizer</h2>
-        <span className="am-muted">Pick a truck — see the closest USPS routes it can cover.</span>
+        <span className="am-muted">Pick a team — see the best NEXT loads to pick up near where their current trip delivers.</span>
       </div>
 
       <div className="opt-wrap">
@@ -95,7 +95,6 @@ export default function RouteOptimizerView() {
             {trucks.map((t) => {
               const cur = currentRouteOf(t);
               const pr = cur ? parseRoute(cur.route) : null;
-              const lp = launchPointOf(t);
               return (
                 <button key={t.tractor} className={`opt-truck ${t.tractor === tractor ? 'on' : ''}`} onClick={() => setTractor(t.tractor)}>
                   <div className="opt-truck-top">
@@ -103,13 +102,13 @@ export default function RouteOptimizerView() {
                     <span className="opt-hrs" style={{ color: t.hoursAvail === 0 ? 'var(--red)' : t.hoursAvail < 20 ? 'var(--amber)' : 'var(--green)' }}>{t.hoursAvail}h</span>
                   </div>
                   <div className="opt-truck-sub">{[t.driver1, t.driver2].filter(Boolean).join(' · ')}</div>
-                  {cur ? (
+                  {cur && pr?.dN ? (
                     <>
-                      <div className="opt-truck-cur">▶ On {pr?.oN || '—'} → <b>{pr?.dN || '—'}</b> <span className="am-muted">({cur.route.match(/FA\w+-?\w*|HCR\s*\w+|\d{4,}/)?.[0] ?? 'route'})</span></div>
-                      <div className="opt-truck-next">next load from <b>{lp.name}</b> · 🏠 {t.homeCity}</div>
+                      <div className="opt-truck-cur">▶ On {pr.oN || '—'} → <b>{pr.dN}</b> <span className="am-muted">({tripCode(cur.route) || 'route'}{cur.source === 'matrix' ? '' : ' · fleet'})</span></div>
+                      <div className="opt-truck-next">delivers {pr.dN} → next load from there · 🏠 {t.homeCity}</div>
                     </>
                   ) : (
-                    <div className="opt-truck-loc">📍 {t.currentCity} → 🏠 {t.homeCity} <span className="am-muted">· no route assigned</span></div>
+                    <div className="opt-truck-loc">📍 at {t.currentCity} → 🏠 {t.homeCity} <span className="am-muted">· {cur ? 'destination unknown' : 'no active trip'}</span></div>
                   )}
                 </button>
               );
@@ -126,15 +125,16 @@ export default function RouteOptimizerView() {
               <div className="opt-controls">
                 <div className="opt-selected">
                   <b>#{truck.tractor}</b> · {truck.hoursAvail}h available
-                  {curRoute
-                    ? <span className="opt-sel-cur"> · finishing <b>{parseRoute(curRoute.route).dN || launch.name}</b> — next loads out of there ↓</span>
-                    : <span className="am-muted"> · at {truck.currentCity} (no route assigned) — next loads out of there ↓</span>}
+                  {curRoute && launch.fromRoute
+                    ? <span className="opt-sel-cur"> · on {tripCode(curRoute.route)} → delivers <b>{launch.name}</b>. Best next loads picking up near {launch.name} ↓</span>
+                    : <span className="am-muted"> · at {truck.currentCity} (no active trip). Best loads picking up near {launch.name} ↓</span>}
                 </div>
                 <div className="opt-radius">
-                  <span className="am-muted">Deadhead from {launch.name} ≤</span>
+                  <span className="am-muted">Pickup within</span>
                   {RADII.map((r) => (
                     <button key={r} className={`opt-chip ${radius === r ? 'on' : ''}`} onClick={() => setRadius(r)}>{r}mi</button>
                   ))}
+                  <span className="am-muted">of {launch.name}</span>
                 </div>
                 <label className="opt-date"><span className="am-muted">Assign to</span><input type="date" className="am-input" value={assignDate} onChange={(e) => setAssignDate(e.target.value)} /></label>
                 <label className="am-usps-check"><input type="checkbox" checked={homeward} onChange={(e) => setHomeward(e.target.checked)} /> Prefer homeward</label>
@@ -150,15 +150,17 @@ export default function RouteOptimizerView() {
                   <table className="am-grid opt-table">
                     <thead>
                       <tr>
-                        <th>DH → pickup</th><th>Pickup</th><th>Destination</th><th>Loaded mi</th><th>Est. hrs</th><th>Homeward</th><th>Fits HOS</th><th></th>
+                        <th>Deadhead</th><th>Pickup</th><th>PU time</th><th>Destination</th><th>Trip #</th><th>Loaded mi</th><th>Est. hrs</th><th>Homeward</th><th>Fits HOS</th><th></th>
                       </tr>
                     </thead>
                     <tbody>
                       {matches.map((m) => (
                         <tr key={m.route} className={m.ok ? '' : 'opt-overhrs'}>
-                          <td className="opt-dh"><b>{m.dh}</b> mi</td>
+                          <td className="opt-dh">{m.dh <= 20 ? <span className="opt-dh-here">picks up here</span> : <><b>{m.dh}</b> mi</>}</td>
                           <td className="opt-route">{m.oN || m.route}<span className="am-muted"> · {m.planning}</span></td>
+                          <td className="opt-putime">{m.puTime || m.departure || '—'}</td>
                           <td className="opt-dest"><b>{m.dN || '—'}</b></td>
+                          <td className="am-muted">{tripCode(m.route) || '—'}</td>
                           <td>{m.miles}</td>
                           <td>{m.hrs}h</td>
                           <td>{m.hw > 0 ? <span className="opt-hw"><span className="opt-hw-bar" style={{ width: `${m.hw}%` }} />{m.hw}%</span> : <span className="am-muted">—</span>}</td>

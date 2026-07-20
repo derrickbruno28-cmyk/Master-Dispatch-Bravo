@@ -15,34 +15,50 @@ export function hd(a1: number, n1: number, a2: number, n2: number): number {
   return R * 2 * Math.atan2(Math.sqrt(x), Math.sqrt(1 - x));
 }
 
-/* Resolve a free-text city to coordinates by substring match against the map. */
+/* Resolve a free-text city to coordinates by substring match against the map.
+   Prefers the LONGEST matching key so "San Antonio" wins over a shorter alias
+   and partial collisions don't grab the wrong city. */
 export function findCC(s: string): CC | null {
   if (!s) return null;
   const u = s.toUpperCase().replace(/[.,]/g, '').trim();
-  for (const [k, v] of Object.entries(CITY_COORDS)) if (u.includes(k)) return { ...v, name: k };
-  return null;
+  let best: CC | null = null;
+  for (const [k, v] of Object.entries(CITY_COORDS)) {
+    if (u.includes(k) && (!best || k.length > best.name.length)) best = { ...v, name: k };
+  }
+  return best;
+}
+
+/* Extract the trip / load code for display: FA2D3-xxx, HCR 7523D-7504, LS 16182,
+   or a bare 4+ digit load number. */
+export function tripCode(r: string): string {
+  const m = r.match(/FA\w+-?\w+|HCR\s*[\w-]+|LS\s*\d+|\b\d{4,}\b/i);
+  return m ? m[0].replace(/\s+/g, ' ').trim() : '';
 }
 
 export interface ParsedRoute { origin: CC | null; destination: CC | null; oN: string; dN: string }
 
 /* Pull origin/destination out of a route label like
-   "Coppell TX - San Antonio TX FA2D3-569". */
+   "Coppell TX - San Antonio TX FA2D3-569" or
+   "Cleveland OH - Akron OH - Irving TX HCR 7523D-7504" (multi-stop → last leg). */
 export function parseRoute(r: string): ParsedRoute {
   if (!r) return { origin: null, destination: null, oN: '', dN: '' };
   const c = r
-    .replace(/FA\w+-?\w*/g, '')
-    .replace(/TRIP\s*[A-Z]/g, '')
-    .replace(/HCR\s*\w+/g, '')
+    .replace(/FA\w+[-\s]?\w*/gi, '')
+    .replace(/HCR\s*[\w-]+/gi, '')
+    .replace(/TRIP\s*[A-Z]/gi, '')
+    .replace(/\bRPDC\b|\bNDC\b/gi, '')
     .replace(/\(.*?\)/g, '')
     .replace(/Solo Approved/gi, '')
+    .replace(/\bLS\b\s*\d+/gi, '')
+    .replace(/\b\d{4,}\b/g, '')
     .trim();
-  const p = c.split(/[-→➔>]+/).map((s) => s.trim()).filter((s) => s.length > 2);
-  if (p.length < 2) return { origin: null, destination: null, oN: c, dN: '' };
+  const p = c.split(/[-–→➜>]+/).map((s) => s.trim().replace(/\n/g, ' ')).filter((s) => s.length > 2);
+  if (p.length < 2) { const only = findCC(c); return { origin: only, destination: null, oN: c, dN: '' }; }
   return {
     origin: findCC(p[0]),
     destination: findCC(p[p.length - 1]),
-    oN: p[0].replace(/\n/g, ' ').trim(),
-    dN: p[p.length - 1].replace(/\n/g, ' ').trim(),
+    oN: p[0],
+    dN: p[p.length - 1],
   };
 }
 
