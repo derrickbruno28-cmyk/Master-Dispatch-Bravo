@@ -1,16 +1,25 @@
 import { useMemo, useRef, useState } from 'react';
 import {
   loadDrivers, saveDriver, removeDriver, blankDriver, importDriversCsv,
+  availabilityOf, daysUntil, AVAIL_PATTERNS,
   DEFAULT_POSITIONS, type Driver,
 } from '../data/driversStore';
 
-/* Master Drivers List — every active driver, their position, address/phone, and
-   constraints. Import the whole roster from CSV; names here autofill the Fleet
-   Status team card, and constraints show next to the driver's name. */
+/* Master Drivers List — the driver-availability hub. Every driver carries a
+   ready-to-go date, a return-home date, and a weekly availability pattern.
+   Alerts at the top flag anyone missing a ready or return date; a blinking
+   green LED marks who's AVAILABLE; a driver whose team already has a route on
+   the Asset Matrix shows ASSIGNED so we can't double-book. Click the Driver or
+   Position header to sort; filter by position with the chips. */
+
+type SortKey = 'name' | 'position';
 
 export default function DriversView() {
   const [drivers, setDrivers] = useState<Driver[]>(() => loadDrivers());
   const [q, setQ] = useState('');
+  const [posFilter, setPosFilter] = useState<string>('ALL');
+  const [sortKey, setSortKey] = useState<SortKey>('name');
+  const [sortDir, setSortDir] = useState<1 | -1>(1);
   const [editing, setEditing] = useState<Driver | null>(null);
   const [isNew, setIsNew] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
@@ -18,10 +27,46 @@ export default function DriversView() {
   const [importMsg, setImportMsg] = useState('');
   const fileRef = useRef<HTMLInputElement>(null);
 
+  /* live availability for every driver, recomputed whenever the roster changes */
+  const avail = useMemo(() => new Map(drivers.map((d) => [d.id, availabilityOf(d)])), [drivers]);
+
+  const positions = useMemo(() => {
+    const s = new Set<string>(DEFAULT_POSITIONS);
+    for (const d of drivers) if (d.position) s.add(d.position);
+    return [...s];
+  }, [drivers]);
+
+  /* alerts — who is missing a ready date / a return date, who's due home soon */
+  const alerts = useMemo(() => {
+    const noReady = drivers.filter((d) => !d.readyDate);
+    const noReturn = drivers.filter((d) => !d.returnDate);
+    const dueSoon = drivers
+      .map((d) => ({ d, left: daysUntil(d.returnDate) }))
+      .filter((x) => x.left !== null && x.left >= 0 && x.left <= 3)
+      .sort((a, b) => (a.left! - b.left!));
+    const overdue = drivers
+      .map((d) => ({ d, left: daysUntil(d.returnDate) }))
+      .filter((x) => x.left !== null && x.left < 0);
+    return { noReady, noReturn, dueSoon, overdue };
+  }, [drivers]);
+
+  const availCount = useMemo(() => [...avail.values()].filter((a) => a.available).length, [avail]);
+
   const rows = useMemo(() => {
     const n = q.trim().toLowerCase();
-    return drivers.filter((d) => !n || `${d.name} ${d.position} ${d.constraints} ${d.address}`.toLowerCase().includes(n));
-  }, [drivers, q]);
+    let list = drivers.filter((d) => !n || `${d.name} ${d.position} ${d.constraints} ${d.address}`.toLowerCase().includes(n));
+    if (posFilter !== 'ALL') list = list.filter((d) => d.position === posFilter);
+    const cmp = (a: Driver, b: Driver) => (sortKey === 'name'
+      ? a.name.localeCompare(b.name)
+      : (a.position.localeCompare(b.position) || a.name.localeCompare(b.name)));
+    return [...list].sort((a, b) => cmp(a, b) * sortDir);
+  }, [drivers, q, posFilter, sortKey, sortDir]);
+
+  function toggleSort(k: SortKey) {
+    if (sortKey === k) setSortDir((d) => (d === 1 ? -1 : 1));
+    else { setSortKey(k); setSortDir(1); }
+  }
+  const sortArrow = (k: SortKey) => (sortKey === k ? (sortDir === 1 ? ' ▲' : ' ▼') : '');
 
   function commit(d: Driver) {
     if (!d.name.trim()) { window.alert('Driver name is required.'); return; }
@@ -49,16 +94,47 @@ export default function DriversView() {
         <h2>Master Drivers List</h2>
         <input className="am-input" style={{ maxWidth: 240 }} placeholder="Search name / position / constraint…" value={q} onChange={(e) => setQ(e.target.value)} />
         <span className="am-muted">{rows.length} of {drivers.length} drivers</span>
+        <span className="drv-availtag"><span className="drv-led" /> {availCount} available</span>
         <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
           <button className="am-clear" onClick={() => setImportOpen((o) => !o)}>⭳ Import</button>
           <button className="am-save" onClick={() => { setEditing(blankDriver()); setIsNew(true); }}>＋ Add Driver</button>
         </div>
       </div>
 
+      {/* availability alerts */}
+      {(alerts.noReady.length > 0 || alerts.noReturn.length > 0 || alerts.dueSoon.length > 0 || alerts.overdue.length > 0) && (
+        <div className="drv-alerts">
+          {alerts.noReady.length > 0 && (
+            <div className="drv-alert drv-alert-warn">
+              ⚠ <b>{alerts.noReady.length}</b> driver{alerts.noReady.length > 1 ? 's' : ''} with <b>no ready-to-go date</b>:
+              <span className="drv-alert-names"> {alerts.noReady.map((d) => d.name).join(', ')}</span>
+            </div>
+          )}
+          {alerts.noReturn.length > 0 && (
+            <div className="drv-alert drv-alert-warn">
+              ⚠ <b>{alerts.noReturn.length}</b> driver{alerts.noReturn.length > 1 ? 's' : ''} with <b>no return date</b>:
+              <span className="drv-alert-names"> {alerts.noReturn.map((d) => d.name).join(', ')}</span>
+            </div>
+          )}
+          {alerts.overdue.length > 0 && (
+            <div className="drv-alert drv-alert-bad">
+              🔴 <b>{alerts.overdue.length}</b> past due home:
+              <span className="drv-alert-names"> {alerts.overdue.map((x) => `${x.d.name} (${-x.left!}d over)`).join(', ')}</span>
+            </div>
+          )}
+          {alerts.dueSoon.length > 0 && (
+            <div className="drv-alert drv-alert-soon">
+              ⏰ due home soon:
+              <span className="drv-alert-names"> {alerts.dueSoon.map((x) => `${x.d.name} (${x.left === 0 ? 'today' : `${x.left}d`})`).join(', ')}</span>
+            </div>
+          )}
+        </div>
+      )}
+
       {importOpen && (
         <div className="otp-form">
-          <div className="otp-field-label" style={{ marginBottom: 6 }}>Import drivers (CSV) — columns: <b>name, position, address, phone, constraints</b> (a header row is auto-detected)</div>
-          <textarea className="am-input" rows={5} placeholder={'name,position,address,phone,constraints\nJohn Smith,SATX Hero,"123 Main St, San Antonio TX",210-555-0100,no NYC'} value={csv} onChange={(e) => setCsv(e.target.value)} />
+          <div className="otp-field-label" style={{ marginBottom: 6 }}>Import drivers (CSV) — columns: <b>name, position, address, phone, constraints, ready, return, pattern</b> (a header row is auto-detected)</div>
+          <textarea className="am-input" rows={5} placeholder={'name,position,address,phone,constraints,ready,return,pattern\nJohn Smith,SATX Hero,"123 Main St, San Antonio TX",210-555-0100,no NYC,2026-07-21,2026-07-27,Mon–Sat'} value={csv} onChange={(e) => setCsv(e.target.value)} />
           <div className="otp-form-btns">
             <button className="am-save" onClick={() => runImport(csv)} disabled={!csv.trim()}>Import pasted CSV</button>
             <label className="am-clear" style={{ cursor: 'pointer' }}>⭳ Upload .csv<input ref={fileRef} type="file" accept=".csv,.txt" style={{ display: 'none' }} onChange={onFile} /></label>
@@ -67,25 +143,62 @@ export default function DriversView() {
         </div>
       )}
 
+      {/* position filter chips */}
+      <div className="am-termfilter drv-posfilter">
+        {(['ALL', ...positions] as string[]).map((p) => (
+          <button key={p} className={`am-tchip ${posFilter === p ? 'on' : ''}`} onClick={() => setPosFilter(p)}>
+            {p === 'ALL' ? 'All positions' : p}
+          </button>
+        ))}
+      </div>
+
       <div className="am-scroll">
-        <table className="am-grid am-fleet">
-          <thead><tr><th>Driver</th><th>Position</th><th>Address</th><th>Phone</th><th>Constraints</th><th></th></tr></thead>
+        <table className="am-grid am-fleet drv-table">
+          <thead>
+            <tr>
+              <th className="drv-sortable" onClick={() => toggleSort('name')}>Driver{sortArrow('name')}</th>
+              <th className="drv-sortable" onClick={() => toggleSort('position')}>Position{sortArrow('position')}</th>
+              <th>Availability</th>
+              <th>Ready</th>
+              <th>Return</th>
+              <th>Pattern</th>
+              <th>Constraints</th>
+              <th></th>
+            </tr>
+          </thead>
           <tbody>
             {rows.length === 0 ? (
-              <tr><td colSpan={6} className="am-muted" style={{ textAlign: 'center', padding: 18 }}>No drivers. Add one, or Import a roster.</td></tr>
-            ) : rows.map((d) => (
-              <tr key={d.id}>
-                <td className="am-tractor">{d.name}</td>
-                <td><span className="am-pill" style={{ color: 'var(--accent)' }}>{d.position}</span></td>
-                <td className="am-muted">{d.address || '—'}</td>
-                <td className="am-muted">{d.phone || '—'}</td>
-                <td className="fleet-constraints">{d.constraints || <span className="am-muted">—</span>}</td>
-                <td className="fleet-actions">
-                  <button className="am-clear" onClick={() => { setEditing({ ...d }); setIsNew(false); }}>✎ Edit</button>
-                  <button className="fleet-del" onClick={() => del(d)}>🗑</button>
-                </td>
-              </tr>
-            ))}
+              <tr><td colSpan={8} className="am-muted" style={{ textAlign: 'center', padding: 18 }}>No drivers. Add one, or Import a roster.</td></tr>
+            ) : rows.map((d) => {
+              const a = avail.get(d.id)!;
+              return (
+                <tr key={d.id}>
+                  <td className="am-tractor">{d.name}</td>
+                  <td><span className="am-pill" style={{ color: 'var(--accent)' }}>{d.position}</span></td>
+                  <td>
+                    {a.assigned ? (
+                      <span className="drv-assigned" title={`On ${a.assigned.route} (#${a.assigned.tractor}) ${a.assigned.date}`}>ASSIGNED</span>
+                    ) : a.available ? (
+                      <span className="drv-avail"><span className="drv-led" /> Available</span>
+                    ) : (
+                      <span className="drv-unavail">{!d.readyDate ? 'No ready date' : (a.daysLeft !== null && a.daysLeft < 0 ? 'Past due' : 'Out')}</span>
+                    )}
+                  </td>
+                  <td className="am-muted">{d.readyDate || <span className="drv-miss">— none —</span>}</td>
+                  <td className="am-muted">
+                    {d.returnDate
+                      ? <span>{d.returnDate}{a.daysLeft !== null && <span className={`drv-days ${a.daysLeft < 0 ? 'over' : a.daysLeft <= 3 ? 'soon' : ''}`}>{a.daysLeft < 0 ? `${-a.daysLeft}d over` : a.daysLeft === 0 ? 'today' : `${a.daysLeft}d left`}</span>}</span>
+                      : <span className="drv-miss">— none —</span>}
+                  </td>
+                  <td>{d.pattern ? <span className="drv-pat">{d.pattern}</span> : <span className="am-muted">—</span>}</td>
+                  <td className="fleet-constraints">{d.constraints || <span className="am-muted">—</span>}</td>
+                  <td className="fleet-actions">
+                    <button className="am-clear" onClick={() => { setEditing({ ...d }); setIsNew(false); }}>✎ Edit</button>
+                    <button className="fleet-del" onClick={() => del(d)}>🗑</button>
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>
@@ -98,6 +211,7 @@ export default function DriversView() {
 function DriverEditor({ driver, isNew, onSave, onCancel }: { driver: Driver; isNew: boolean; onSave: (d: Driver) => void; onCancel: () => void }) {
   const [d, setD] = useState<Driver>(driver);
   function f<K extends keyof Driver>(k: K, v: Driver[K]) { setD((p) => ({ ...p, [k]: v })); }
+  const left = daysUntil(d.returnDate);
   return (
     <div className="fleet-modal-back" onClick={onCancel}>
       <div className="fleet-modal" onClick={(e) => e.stopPropagation()}>
@@ -108,6 +222,26 @@ function DriverEditor({ driver, isNew, onSave, onCancel }: { driver: Driver; isN
           <L t="Phone"><input className="am-input" value={d.phone} onChange={(e) => f('phone', e.target.value)} /></L>
           <L t="Address"><input className="am-input" value={d.address} onChange={(e) => f('address', e.target.value)} /></L>
         </div>
+
+        <div className="fleet-form-grid">
+          <L t="Ready-to-go date"><input className="am-input" type="date" value={d.readyDate} onChange={(e) => f('readyDate', e.target.value)} /></L>
+          <L t={`Return-home date${left !== null ? left < 0 ? ` · ${-left}d over` : ` · ${left}d left` : ''}`}>
+            <input className="am-input" type="date" value={d.returnDate} onChange={(e) => f('returnDate', e.target.value)} />
+          </L>
+        </div>
+
+        <div className="otp-field" style={{ marginTop: 4 }}>
+          <span className="otp-field-label">Availability pattern</span>
+          <div className="drv-pat-choices">
+            {AVAIL_PATTERNS.map((p) => (
+              <label key={p} className={`drv-pat-check ${d.pattern === p ? 'on' : ''}`}>
+                <input type="checkbox" checked={d.pattern === p} onChange={() => f('pattern', d.pattern === p ? '' : p)} />
+                {p}
+              </label>
+            ))}
+          </div>
+        </div>
+
         <L t="Constraints (e.g. no NYC · solo only · hazmat · home by Fri)">
           <textarea className="am-input" rows={2} value={d.constraints} onChange={(e) => f('constraints', e.target.value)} />
         </L>
