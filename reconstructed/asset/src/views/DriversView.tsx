@@ -25,6 +25,7 @@ export default function DriversView() {
   const [importOpen, setImportOpen] = useState(false);
   const [csv, setCsv] = useState('');
   const [importMsg, setImportMsg] = useState('');
+  const [confirmDel, setConfirmDel] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
   /* live availability for every driver, recomputed whenever the roster changes */
@@ -69,12 +70,10 @@ export default function DriversView() {
   const sortArrow = (k: SortKey) => (sortKey === k ? (sortDir === 1 ? ' ▲' : ' ▼') : '');
 
   function commit(d: Driver) {
-    if (!d.name.trim()) { window.alert('Driver name is required.'); return; }
     setDrivers(saveDriver(d)); setEditing(null);
   }
-  function del(d: Driver) {
-    if (!window.confirm(`Remove ${d.name} from the master list?`)) return;
-    setDrivers(removeDriver(d.id));
+  function del(id: string) {
+    setDrivers(removeDriver(id)); setConfirmDel(null);
   }
   function runImport(text: string) {
     const res = importDriversCsv(text);
@@ -193,8 +192,18 @@ export default function DriversView() {
                   <td>{d.pattern ? <span className="drv-pat">{d.pattern}</span> : <span className="am-muted">—</span>}</td>
                   <td className="fleet-constraints">{d.constraints || <span className="am-muted">—</span>}</td>
                   <td className="fleet-actions">
-                    <button className="am-clear" onClick={() => { setEditing({ ...d }); setIsNew(false); }}>✎ Edit</button>
-                    <button className="fleet-del" onClick={() => del(d)}>🗑</button>
+                    {confirmDel === d.id ? (
+                      <>
+                        <span className="am-muted" style={{ fontSize: 10.5 }}>Remove?</span>
+                        <button className="fleet-del" title="Confirm remove" onClick={() => del(d.id)}>✓</button>
+                        <button className="am-clear" title="Keep" onClick={() => setConfirmDel(null)}>✕</button>
+                      </>
+                    ) : (
+                      <>
+                        <button className="am-clear" onClick={() => { setEditing({ ...d }); setIsNew(false); }}>✎ Edit</button>
+                        <button className="fleet-del" onClick={() => setConfirmDel(d.id)}>🗑</button>
+                      </>
+                    )}
                   </td>
                 </tr>
               );
@@ -246,8 +255,9 @@ function DriverEditor({ driver, isNew, onSave, onCancel }: { driver: Driver; isN
           <textarea className="am-input" rows={2} value={d.constraints} onChange={(e) => f('constraints', e.target.value)} />
         </L>
         <div className="fleet-modal-btns">
-          <button className="am-save" onClick={() => onSave(d)}>{isNew ? 'Add driver' : 'Save changes'}</button>
+          <button className="am-save" disabled={!d.name.trim()} onClick={() => onSave(d)}>{isNew ? 'Add driver' : 'Save changes'}</button>
           <button className="am-cancel" onClick={onCancel}>Cancel</button>
+          {!d.name.trim() && <span className="am-muted" style={{ fontSize: 11, color: 'var(--red)' }}>Driver name is required to save.</span>}
         </div>
       </div>
     </div>

@@ -198,10 +198,15 @@
 
 /* Master drivers + editable options + shutdown */
 .drv-con { color: var(--amber); font-size: 10px; font-weight: 600; }
+.opt-select-wrap { display: flex; flex-direction: column; gap: 5px; }
 .opt-select-row { display: flex; gap: 4px; align-items: stretch; }
 .opt-select-row select { flex: 1; }
+.opt-add-row { display: flex; gap: 4px; align-items: stretch; }
+.opt-add-row input { flex: 1; }
 .opt-add-btn { border: 1px solid var(--border); background: var(--panel); color: var(--accent); border-radius: 6px; padding: 0 9px; font-weight: 800; cursor: pointer; }
 .opt-add-btn:hover { border-color: var(--accent); }
+.opt-add-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.opt-add-ok { color: var(--green); }
 .fleet-shutdown td { background: rgba(245,80,90,0.08); }
 .fleet-shutdown .am-tractor { color: var(--red); }
 .row-shutdown .am-truckcol { background: rgba(245,80,90,0.1) !important; }

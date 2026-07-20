@@ -27,6 +27,7 @@ export default function FleetStatusView() {
   const [q, setQ] = useState('');
   const [editing, setEditing] = useState<FleetTruck | null>(null);
   const [isNew, setIsNew] = useState(false);
+  const [confirmDel, setConfirmDel] = useState<string | null>(null);
 
   const rows = useMemo(() => {
     const n = q.trim().toLowerCase();
@@ -34,12 +35,10 @@ export default function FleetStatusView() {
   }, [fleet, q]);
 
   function commit(t: FleetTruck) {
-    if (!t.tractor.trim()) { window.alert('Tractor # is required.'); return; }
     setFleet(saveTruck(t)); setEditing(null);
   }
-  function del(t: FleetTruck) {
-    if (!window.confirm(`Remove team #${t.tractor} (${t.driver1 || 'no driver'})?`)) return;
-    setFleet(removeTruck(t.tractor));
+  function del(tractor: string) {
+    setFleet(removeTruck(tractor)); setConfirmDel(null);
   }
 
   return (
@@ -68,8 +67,18 @@ export default function FleetStatusView() {
                 <td><span className="am-pill" style={{ color: STATUS_CLR[t.status] ?? 'var(--text)' }}>{t.status === 'shutdown' ? '⛔ shutdown' : t.status}</span></td>
                 <td className="fleet-constraints">{t.constraints || <span className="am-muted">—</span>}</td>
                 <td className="fleet-actions">
-                  <button className="am-clear" onClick={() => { setEditing({ ...t }); setIsNew(false); }}>✎ Edit</button>
-                  <button className="fleet-del" onClick={() => del(t)}>🗑</button>
+                  {confirmDel === t.tractor ? (
+                    <>
+                      <span className="am-muted" style={{ fontSize: 10.5 }}>Remove?</span>
+                      <button className="fleet-del" title="Confirm remove" onClick={() => del(t.tractor)}>✓</button>
+                      <button className="am-clear" title="Keep" onClick={() => setConfirmDel(null)}>✕</button>
+                    </>
+                  ) : (
+                    <>
+                      <button className="am-clear" onClick={() => { setEditing({ ...t }); setIsNew(false); }}>✎ Edit</button>
+                      <button className="fleet-del" onClick={() => setConfirmDel(t.tractor)}>🗑</button>
+                    </>
+                  )}
                 </td>
               </tr>
             ))}
@@ -82,20 +91,39 @@ export default function FleetStatusView() {
   );
 }
 
-/* editable dropdown: options come from the options store; ＋ adds a new one */
+/* editable dropdown: options come from the options store; ＋ reveals an inline
+   input to add a new one (window.prompt is blocked in sandboxed iframes, so the
+   add flow is a real input field — click ＋, type, press Enter or ✓). */
 function OptSelect({ kind, value, onChange }: { kind: OptionKind; value: string; onChange: (v: string) => void }) {
   const [opts, setOpts] = useState<string[]>(() => getOptions(kind));
-  function add() {
-    const v = window.prompt(`Add a new ${kind} option:`);
-    if (v && v.trim()) { const next = addOption(kind, v); setOpts(next); onChange(v.trim()); }
+  const [adding, setAdding] = useState(false);
+  const [draft, setDraft] = useState('');
+  function commitAdd() {
+    const v = draft.trim();
+    if (v) { const next = addOption(kind, v); setOpts(next); onChange(v); }
+    setDraft(''); setAdding(false);
   }
+  function cancelAdd() { setDraft(''); setAdding(false); }
   return (
-    <div className="opt-select-row">
-      <select className="am-input" value={value} onChange={(e) => onChange(e.target.value)}>
-        {!opts.includes(value) && value && <option value={value}>{value}</option>}
-        {opts.map((o) => <option key={o} value={o}>{o}</option>)}
-      </select>
-      <button type="button" className="opt-add-btn" title={`Add a ${kind} option`} onClick={add}>＋</button>
+    <div className="opt-select-wrap">
+      <div className="opt-select-row">
+        <select className="am-input" value={value} onChange={(e) => onChange(e.target.value)}>
+          {!opts.includes(value) && value && <option value={value}>{value}</option>}
+          {opts.map((o) => <option key={o} value={o}>{o}</option>)}
+        </select>
+        <button type="button" className="opt-add-btn" title={`Add a ${kind} option`} onClick={() => setAdding((a) => !a)}>＋</button>
+      </div>
+      {adding && (
+        <div className="opt-add-row">
+          <input
+            className="am-input" autoFocus placeholder={`New ${kind} option…`} value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); commitAdd(); } if (e.key === 'Escape') cancelAdd(); }}
+          />
+          <button type="button" className="opt-add-btn opt-add-ok" title="Add" onClick={commitAdd} disabled={!draft.trim()}>✓</button>
+          <button type="button" className="opt-add-btn" title="Cancel" onClick={cancelAdd}>✕</button>
+        </div>
+      )}
     </div>
   );
 }
@@ -124,8 +152,9 @@ function TruckEditor({ truck, isNew, onSave, onCancel }: { truck: FleetTruck; is
           <textarea className="am-input" rows={2} value={t.constraints} onChange={(e) => f('constraints', e.target.value)} />
         </L>
         <div className="fleet-modal-btns">
-          <button className="am-save" onClick={() => onSave(t)}>{isNew ? 'Add team' : 'Save changes'}</button>
+          <button className="am-save" disabled={!t.tractor.trim()} onClick={() => onSave(t)}>{isNew ? 'Add team' : 'Save changes'}</button>
           <button className="am-cancel" onClick={onCancel}>Cancel</button>
+          {!t.tractor.trim() && <span className="am-muted" style={{ fontSize: 11, color: 'var(--red)' }}>Tractor # is required to save.</span>}
         </div>
       </div>
     </div>
