@@ -246,3 +246,12 @@
 .drv-pat-choices { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
 .drv-pat-check { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; font-weight: 600; border: 1px solid var(--border); border-radius: 6px; padding: 4px 9px; cursor: pointer; user-select: none; }
 .drv-pat-check.on { border-color: var(--accent); color: var(--accent); background: rgba(37,99,235,0.08); }
+
+/* ---- Asset Matrix inline notice + clear-confirm (no browser pop-ups) ---- */
+.am-notice { margin-top: 8px; font-size: 12px; font-weight: 700; color: var(--red); background: rgba(245,80,90,0.1); border: 1px solid rgba(245,80,90,0.35); border-radius: 8px; padding: 6px 11px; }
+.am-clearconfirm { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; gap: 6px; background: color-mix(in srgb, var(--panel) 88%, transparent); border-radius: 6px; font-size: 10.5px; font-weight: 800; z-index: 5; }
+.am-clearconfirm button { border: 1px solid var(--border); background: var(--panel); border-radius: 5px; padding: 2px 8px; cursor: pointer; font-weight: 800; line-height: 1; }
+.am-cc-yes { color: var(--red); }
+.am-cc-yes:hover { border-color: var(--red); }
+.am-cc-no { color: var(--muted); }
+.am-assign { position: relative; }

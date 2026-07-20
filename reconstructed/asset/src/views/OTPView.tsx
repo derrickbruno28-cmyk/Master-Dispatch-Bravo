@@ -67,7 +67,7 @@ export default function OTPView() {
 
   function set<K extends keyof Draft>(k: K, v: Draft[K]) { setForm((f) => ({ ...f, [k]: v })); }
   function add() {
-    if (!form.trip && !form.ls) { window.alert('Enter at least a Trip # or LS #.'); return; }
+    if (!form.trip && !form.ls) return;
     setShips((p) => [{ ...form, id: `s-${Date.now()}` }, ...p]);
     setForm(BLANK); setFormOpen(false);
   }
@@ -122,8 +122,9 @@ export default function OTPView() {
             <L t="Month"><input className="am-input" placeholder="March 2026" value={form.month} onChange={(e) => set('month', e.target.value)} /></L>
           </div>
           <div className="otp-form-btns">
-            <button className="am-save" onClick={add}>✅ Save Shipment</button>
+            <button className="am-save" disabled={!form.trip && !form.ls} onClick={add}>✅ Save Shipment</button>
             <button className="am-cancel" onClick={() => setFormOpen(false)}>Cancel</button>
+            {!form.trip && !form.ls && <span className="am-muted" style={{ fontSize: 11, color: 'var(--red)' }}>Enter at least a Trip # or LS #.</span>}
           </div>
         </div>
       )}

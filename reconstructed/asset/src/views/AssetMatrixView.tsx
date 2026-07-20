@@ -32,7 +32,12 @@ export default function AssetMatrixView() {
   const [assign, setAssign] = useState<Record<string, Assignment>>(() => { ensureSeed(); return loadAssignments(); });
   const [editing, setEditing] = useState<string | null>(null);
   const [termFilter, setTermFilter] = useState<string>('ALL');
+  const [confirmClear, setConfirmClear] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string>('');
   const fleet = useMemo(() => loadFleet(), []);
+
+  /* transient inline notice — replaces window.alert (blocked in sandboxes) */
+  function flash(msg: string) { setNotice(msg); window.setTimeout(() => setNotice(''), 2600); }
 
   const dates = useMemo(() => DAYS.map((_, i) => isoDate(addDays(weekStart, i))), [weekStart]);
   const shownTerminals: string[] = termFilter === 'ALL' ? [...TERMINALS] : [termFilter];
@@ -96,6 +101,7 @@ export default function AssetMatrixView() {
           ))}
           <span className="am-legend-item"><span className="am-usps">USPS</span> = contract route</span>
         </div>
+        {notice && <div className="am-notice">⛔ {notice}</div>}
       </div>
 
       <div className="am-scroll">
@@ -123,6 +129,9 @@ export default function AssetMatrixView() {
                 setEditing={setEditing}
                 save={save}
                 move={move}
+                confirmClear={confirmClear}
+                setConfirmClear={setConfirmClear}
+                flash={flash}
               />
             ))}
           </tbody>
@@ -132,11 +141,13 @@ export default function AssetMatrixView() {
   );
 }
 
-function TerminalRows({ term, trucks, dates, assign, editing, setEditing, save, move }: {
+function TerminalRows({ term, trucks, dates, assign, editing, setEditing, save, move, confirmClear, setConfirmClear, flash }: {
   term: string; trucks: FleetTruck[]; dates: string[];
   assign: Record<string, Assignment>; editing: string | null;
   setEditing: (k: string | null) => void; save: (k: string, a: Assignment) => void;
   move: (fromKey: string, toKey: string) => void;
+  confirmClear: string | null; setConfirmClear: (k: string | null) => void;
+  flash: (msg: string) => void;
 }) {
   return (
     <>
@@ -161,7 +172,7 @@ function TerminalRows({ term, trucks, dates, assign, editing, setEditing, save, 
               <td
                 key={d}
                 className="am-cell"
-                onClick={() => { if (down) { window.alert(`Team #${t.tractor} is in SHUTDOWN — cannot assign a route.`); return; } setEditing(k); }}
+                onClick={() => { if (down) { flash(`Team #${t.tractor} is in SHUTDOWN — cannot assign a route.`); return; } setEditing(k); }}
                 onDragOver={(e) => { if (a === undefined && !down) e.preventDefault(); }}
                 onDrop={(e) => { if (down) return; const from = e.dataTransfer.getData('text/plain'); if (from) move(from, k); }}
               >
@@ -171,7 +182,7 @@ function TerminalRows({ term, trucks, dates, assign, editing, setEditing, save, 
                     style={{ borderLeftColor: STATUS_COLOR[a.status] }}
                     draggable
                     onDragStart={(e) => { e.stopPropagation(); e.dataTransfer.setData('text/plain', k); }}
-                    onContextMenu={(e) => { e.preventDefault(); if (window.confirm('Clear this assignment?')) save(k, { route: '', status: a.status, usps: a.usps }); }}
+                    onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); setConfirmClear(k); }}
                     title="Drag to an empty day to move · right-click to clear"
                   >
                     <div className="am-route">
@@ -183,6 +194,13 @@ function TerminalRows({ term, trucks, dates, assign, editing, setEditing, save, 
                     {done && (nextA
                       ? <div className="am-next am-next-ok">→ next: {nextA.route.split(' ')[0]}</div>
                       : <div className="am-next am-next-need">🔴 Needs next load</div>)}
+                    {confirmClear === k && (
+                      <div className="am-clearconfirm" onClick={(e) => e.stopPropagation()}>
+                        <span>Clear?</span>
+                        <button className="am-cc-yes" title="Clear assignment" onClick={(e) => { e.stopPropagation(); save(k, { route: '', status: a.status, usps: a.usps }); setConfirmClear(null); }}>✓</button>
+                        <button className="am-cc-no" title="Keep" onClick={(e) => { e.stopPropagation(); setConfirmClear(null); }}>✕</button>
+                      </div>
+                    )}
                   </div>
                 ) : <span className="am-add">+</span>}
               </td>
