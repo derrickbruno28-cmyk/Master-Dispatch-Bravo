@@ -55,9 +55,13 @@ export interface Match extends AssetRoute, ParsedRoute {
   ok: boolean;  // fits the driver's hours available
 }
 
-/* Rank routes for a driver within a deadhead radius (road miles). */
-export function getMatches(d: Truck, radius: number): Match[] {
-  const dc = findCC(d.currentCity);
+/* Rank routes for a driver within a deadhead radius (road miles).
+   `fromCity` overrides the start point — pass the destination of the truck's
+   CURRENT route so the suggestions are the best NEXT loads out of where the
+   team will actually be once they finish. Defaults to the truck's current city. */
+export function getMatches(d: Truck, radius: number, fromCity?: string): Match[] {
+  const start = (fromCity && fromCity.trim()) || d.currentCity;
+  const dc = findCC(start);
   if (!dc) return [];
   const hc = findCC(d.homeCity);
   const out: Match[] = [];

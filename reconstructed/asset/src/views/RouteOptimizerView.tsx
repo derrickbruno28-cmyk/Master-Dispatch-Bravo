@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { loadFleet } from '../data/fleetStore';
-import { getMatches, type Match } from '../data/optimize';
-import { setAssignment, isoDate, loadAssignments, driverConflicts } from '../data/schedule';
+import { getMatches, parseRoute, type Match } from '../data/optimize';
+import { setAssignment, isoDate, loadAssignments, parseCellKey, driverConflicts } from '../data/schedule';
 
 /* Route Optimizer — ported from the Operations Center onto the shared
    foundation. Pick a truck → the USPS routes it can cover, ranked by deadhead
@@ -20,18 +20,44 @@ export default function RouteOptimizerView() {
   const [pending, setPending] = useState<string>('');   // route awaiting an "assign anyway"
   const [conflictMsg, setConflictMsg] = useState('');
 
+  const assignments = useMemo(() => loadAssignments(), []);
+
+  /* The truck's CURRENT route — where they'll finish. Prefer the live Asset
+     Matrix assignment (soonest-dated); fall back to the fleet card's currentRoute.
+     Its destination becomes the launch point for the next-load suggestions. */
+  type CurRoute = { route: string; date?: string; source: 'matrix' | 'fleet' } | null;
+  function currentRouteOf(t: { tractor: string; currentRoute?: string }): CurRoute {
+    const rows = Object.entries(assignments)
+      .map(([k, a]) => ({ p: parseCellKey(k), a }))
+      .filter((x) => x.p.tractor === t.tractor && (x.a.route || '').trim())
+      .sort((p, r) => p.p.date.localeCompare(r.p.date));
+    if (rows[0]) return { route: rows[0].a.route, date: rows[0].p.date, source: 'matrix' };
+    if ((t.currentRoute || '').trim()) return { route: t.currentRoute!, source: 'fleet' };
+    return null;
+  }
+  /* where a truck will be next: destination of its current route, else its city */
+  function launchPointOf(t: { tractor: string; currentCity: string; currentRoute?: string }): { name: string; fromRoute: boolean } {
+    const cur = currentRouteOf(t);
+    if (cur) { const d = parseRoute(cur.route).dN; if (d) return { name: d, fromRoute: true }; }
+    return { name: t.currentCity, fromRoute: false };
+  }
+
   const truck = useMemo(() => TRUCKS.find((t) => t.tractor === tractor), [tractor]);
   const trucks = useMemo(() => {
     const n = q.trim().toLowerCase();
     return TRUCKS.filter((t) => !n || `${t.tractor} ${t.driver1} ${t.driver2} ${t.currentCity}`.toLowerCase().includes(n));
   }, [q]);
 
+  const curRoute = truck ? currentRouteOf(truck) : null;
+  const launch = truck ? launchPointOf(truck) : { name: '', fromRoute: false };
+
   const matches = useMemo<Match[]>(() => {
     if (!truck) return [];
-    const m = getMatches(truck, radius);
+    const m = getMatches(truck, radius, launch.name);
     m.sort((a, b) => (homeward ? b.hw - a.hw || a.dh - b.dh : a.dh - b.dh || b.hw - a.hw));
     return m;
-  }, [truck, radius, homeward]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [truck, radius, homeward, launch.name]);
 
   /* Assign a route straight onto the Asset Matrix (shared schedule) for the
      chosen truck + day — it shows up on the Matrix and Routes Covered. Guards
@@ -66,16 +92,28 @@ export default function RouteOptimizerView() {
         <div className="opt-trucks">
           <input className="am-input" placeholder="Search truck / driver / city…" value={q} onChange={(e) => setQ(e.target.value)} />
           <div className="opt-trucklist">
-            {trucks.map((t) => (
-              <button key={t.tractor} className={`opt-truck ${t.tractor === tractor ? 'on' : ''}`} onClick={() => setTractor(t.tractor)}>
-                <div className="opt-truck-top">
-                  <b>#{t.tractor}</b>
-                  <span className="opt-hrs" style={{ color: t.hoursAvail === 0 ? 'var(--red)' : t.hoursAvail < 20 ? 'var(--amber)' : 'var(--green)' }}>{t.hoursAvail}h</span>
-                </div>
-                <div className="opt-truck-sub">{[t.driver1, t.driver2].filter(Boolean).join(' · ')}</div>
-                <div className="opt-truck-loc">📍 {t.currentCity} → 🏠 {t.homeCity}</div>
-              </button>
-            ))}
+            {trucks.map((t) => {
+              const cur = currentRouteOf(t);
+              const pr = cur ? parseRoute(cur.route) : null;
+              const lp = launchPointOf(t);
+              return (
+                <button key={t.tractor} className={`opt-truck ${t.tractor === tractor ? 'on' : ''}`} onClick={() => setTractor(t.tractor)}>
+                  <div className="opt-truck-top">
+                    <b>#{t.tractor}</b>
+                    <span className="opt-hrs" style={{ color: t.hoursAvail === 0 ? 'var(--red)' : t.hoursAvail < 20 ? 'var(--amber)' : 'var(--green)' }}>{t.hoursAvail}h</span>
+                  </div>
+                  <div className="opt-truck-sub">{[t.driver1, t.driver2].filter(Boolean).join(' · ')}</div>
+                  {cur ? (
+                    <>
+                      <div className="opt-truck-cur">▶ On {pr?.oN || '—'} → <b>{pr?.dN || '—'}</b> <span className="am-muted">({cur.route.match(/FA\w+-?\w*|HCR\s*\w+|\d{4,}/)?.[0] ?? 'route'})</span></div>
+                      <div className="opt-truck-next">next load from <b>{lp.name}</b> · 🏠 {t.homeCity}</div>
+                    </>
+                  ) : (
+                    <div className="opt-truck-loc">📍 {t.currentCity} → 🏠 {t.homeCity} <span className="am-muted">· no route assigned</span></div>
+                  )}
+                </button>
+              );
+            })}
           </div>
         </div>
 
@@ -87,10 +125,13 @@ export default function RouteOptimizerView() {
             <>
               <div className="opt-controls">
                 <div className="opt-selected">
-                  <b>#{truck.tractor}</b> · {truck.currentCity} · {truck.hoursAvail}h available
+                  <b>#{truck.tractor}</b> · {truck.hoursAvail}h available
+                  {curRoute
+                    ? <span className="opt-sel-cur"> · finishing <b>{parseRoute(curRoute.route).dN || launch.name}</b> — next loads out of there ↓</span>
+                    : <span className="am-muted"> · at {truck.currentCity} (no route assigned) — next loads out of there ↓</span>}
                 </div>
                 <div className="opt-radius">
-                  <span className="am-muted">Deadhead ≤</span>
+                  <span className="am-muted">Deadhead from {launch.name} ≤</span>
                   {RADII.map((r) => (
                     <button key={r} className={`opt-chip ${radius === r ? 'on' : ''}`} onClick={() => setRadius(r)}>{r}mi</button>
                   ))}
@@ -103,20 +144,21 @@ export default function RouteOptimizerView() {
               {conflictMsg && <div className="opt-assign-note am-dblbook">{conflictMsg}</div>}
 
               {matches.length === 0 ? (
-                <p className="am-muted">No routes within {radius} mi deadhead of {truck.currentCity}. Try a wider radius.</p>
+                <p className="am-muted">No routes within {radius} mi of {launch.name}. Try a wider radius.</p>
               ) : (
                 <div className="am-scroll">
                   <table className="am-grid opt-table">
                     <thead>
                       <tr>
-                        <th>Deadhead</th><th>Route</th><th>Loaded mi</th><th>Est. hrs</th><th>Homeward</th><th>Fits HOS</th><th></th>
+                        <th>DH → pickup</th><th>Pickup</th><th>Destination</th><th>Loaded mi</th><th>Est. hrs</th><th>Homeward</th><th>Fits HOS</th><th></th>
                       </tr>
                     </thead>
                     <tbody>
                       {matches.map((m) => (
                         <tr key={m.route} className={m.ok ? '' : 'opt-overhrs'}>
                           <td className="opt-dh"><b>{m.dh}</b> mi</td>
-                          <td className="opt-route">{m.route}<span className="am-muted"> · {m.planning}</span></td>
+                          <td className="opt-route">{m.oN || m.route}<span className="am-muted"> · {m.planning}</span></td>
+                          <td className="opt-dest"><b>{m.dN || '—'}</b></td>
                           <td>{m.miles}</td>
                           <td>{m.hrs}h</td>
                           <td>{m.hw > 0 ? <span className="opt-hw"><span className="opt-hw-bar" style={{ width: `${m.hw}%` }} />{m.hw}%</span> : <span className="am-muted">—</span>}</td>
