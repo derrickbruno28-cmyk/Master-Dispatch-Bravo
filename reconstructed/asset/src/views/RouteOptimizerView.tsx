@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { loadFleet } from '../data/fleetStore';
 import { getMatches, type Match } from '../data/optimize';
-import { setAssignment, isoDate } from '../data/schedule';
+import { setAssignment, isoDate, loadAssignments, driverConflicts } from '../data/schedule';
 
 /* Route Optimizer — ported from the Operations Center onto the shared
    foundation. Pick a truck → the USPS routes it can cover, ranked by deadhead
@@ -17,6 +17,8 @@ export default function RouteOptimizerView() {
   const [q, setQ] = useState('');
   const [assignDate, setAssignDate] = useState(isoDate(new Date()));
   const [note, setNote] = useState('');
+  const [pending, setPending] = useState<string>('');   // route awaiting an "assign anyway"
+  const [conflictMsg, setConflictMsg] = useState('');
 
   const truck = useMemo(() => TRUCKS.find((t) => t.tractor === tractor), [tractor]);
   const trucks = useMemo(() => {
@@ -32,11 +34,24 @@ export default function RouteOptimizerView() {
   }, [truck, radius, homeward]);
 
   /* Assign a route straight onto the Asset Matrix (shared schedule) for the
-     chosen truck + day — it shows up on the Matrix and Routes Covered. */
-  function assign(m: Match) {
+     chosen truck + day — it shows up on the Matrix and Routes Covered. Guards
+     against double-booking a driver already committed that day (one confirm). */
+  function doAssign(m: Match) {
     if (!truck) return;
     void setAssignment(truck.tractor, assignDate, { route: m.route, status: 'covered', usps: true });
     setNote(`✓ Assigned ${m.route} to #${truck.tractor} on ${assignDate} — see it on the Asset Matrix.`);
+    setPending(''); setConflictMsg('');
+  }
+  function assign(m: Match) {
+    if (!truck) return;
+    const conflicts = driverConflicts(truck.tractor, assignDate, loadAssignments(), TRUCKS);
+    if (conflicts.length && pending !== m.route) {
+      setPending(m.route);
+      setConflictMsg(`⚠ Double-book on ${assignDate}: ${conflicts.map((c) => `${c.driver} is already on #${c.tractor} (${c.route.split(' ')[0]})`).join('; ')}. Click “Assign anyway” to override.`);
+      setNote('');
+      return;
+    }
+    doAssign(m);
   }
 
   return (
@@ -85,6 +100,7 @@ export default function RouteOptimizerView() {
                 <span className="am-muted">{matches.length} routes</span>
               </div>
               {note && <div className="opt-assign-note">{note}</div>}
+              {conflictMsg && <div className="opt-assign-note am-dblbook">{conflictMsg}</div>}
 
               {matches.length === 0 ? (
                 <p className="am-muted">No routes within {radius} mi deadhead of {truck.currentCity}. Try a wider radius.</p>
@@ -105,7 +121,7 @@ export default function RouteOptimizerView() {
                           <td>{m.hrs}h</td>
                           <td>{m.hw > 0 ? <span className="opt-hw"><span className="opt-hw-bar" style={{ width: `${m.hw}%` }} />{m.hw}%</span> : <span className="am-muted">—</span>}</td>
                           <td>{m.ok ? <span style={{ color: 'var(--green)' }}>✓</span> : <span style={{ color: 'var(--red)' }}>over</span>}</td>
-                          <td><button className="opt-assign" onClick={() => assign(m)}>Assign →</button></td>
+                          <td><button className={pending === m.route ? 'opt-assign opt-assign-warn' : 'opt-assign'} onClick={() => assign(m)}>{pending === m.route ? 'Assign anyway' : 'Assign →'}</button></td>
                         </tr>
                       ))}
                     </tbody>

@@ -78,6 +78,33 @@ export async function setAssignment(tractor: string, date: string, a: Assignment
   }
 }
 
+/* ---- double-booking guard --------------------------------------------------
+   A driver is double-booked if the SAME person (by name, across driver1/driver2)
+   is on another truck that already has a route on that same day. Pure — takes the
+   live assign map + fleet so it reflects unsaved grid edits, not just storage. */
+export interface DriverConflict { driver: string; tractor: string; route: string }
+export function driverConflicts(
+  tractor: string, date: string,
+  assign: Record<string, Assignment>,
+  fleet: { tractor: string; driver1: string; driver2: string }[],
+): DriverConflict[] {
+  const me = fleet.find((t) => t.tractor === tractor);
+  if (!me) return [];
+  const mine = [me.driver1, me.driver2].map((d) => (d || '').trim().toLowerCase()).filter(Boolean);
+  if (!mine.length) return [];
+  const out: DriverConflict[] = [];
+  for (const t of fleet) {
+    if (t.tractor === tractor) continue;
+    const a = assign[cellKey(t.tractor, date)];
+    if (!a || !a.route.trim()) continue;
+    for (const dn of [t.driver1, t.driver2]) {
+      const key = (dn || '').trim().toLowerCase();
+      if (key && mine.includes(key)) out.push({ driver: (dn || '').trim(), tractor: t.tractor, route: a.route });
+    }
+  }
+  return out;
+}
+
 /* Move an assignment from one cell to another (drag-to-move). */
 export async function moveAssignment(fromKey: string, toKey: string) {
   if (fromKey === toKey) return;

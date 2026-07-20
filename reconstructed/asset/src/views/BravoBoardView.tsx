@@ -3,7 +3,7 @@ import { ROUTES } from '../data/fleet';
 import { loadFleet } from '../data/fleetStore';
 import {
   loadAssignments, setAssignment, cellKey, parseCellKey,
-  isoDate, mondayOf, addDays, type Assignment,
+  isoDate, mondayOf, addDays, driverConflicts, type Assignment, type DriverConflict,
 } from '../data/schedule';
 
 /* Bravo Matrix (brokerage side) — a focused board so you can switch ⇄ between
@@ -18,6 +18,7 @@ export default function BravoBoardView() {
   const [weekStart, setWeekStart] = useState<Date>(() => mondayOf(new Date()));
   const [assign, setAssign] = useState<Record<string, Assignment>>(() => loadAssignments());
   const [editing, setEditing] = useState<string | null>(null); // `${route}__${date}`
+  const [pending, setPending] = useState<{ kk: string; route: string; date: string; tractor: string; conflicts: DriverConflict[] } | null>(null);
   const fleet = useMemo(() => loadFleet(), []);
 
   const dates = useMemo(() => DAYS.map((_, i) => isoDate(addDays(weekStart, i))), [weekStart]);
@@ -33,7 +34,7 @@ export default function BravoBoardView() {
     return m;
   }, [assign]);
 
-  function cover(route: string, date: string, tractor: string) {
+  function doCover(route: string, date: string, tractor: string) {
     // clear any existing cover of this lane/day, then assign the chosen truck
     const prev = coverage.get(`${route}__${date}`);
     setAssign((cur) => {
@@ -44,7 +45,16 @@ export default function BravoBoardView() {
     });
     if (prev) void setAssignment(prev, date, null);
     if (tractor) void setAssignment(tractor, date, { route, status: 'covered', usps: true });
-    setEditing(null);
+    setEditing(null); setPending(null);
+  }
+  /* double-booking guard — one confirm if the chosen truck's driver is already
+     committed that day on another lane */
+  function cover(route: string, date: string, tractor: string) {
+    if (tractor) {
+      const conflicts = driverConflicts(tractor, date, assign, fleet);
+      if (conflicts.length) { setPending({ kk: `${route}__${date}`, route, date, tractor, conflicts }); setEditing(null); return; }
+    }
+    doCover(route, date, tractor);
   }
 
   return (
@@ -80,6 +90,17 @@ export default function BravoBoardView() {
                 {dates.map((d) => {
                   const kk = `${lane.route}__${d}`;
                   const truck = coverage.get(kk);
+                  if (pending && pending.kk === kk) {
+                    return (
+                      <td key={d} className="am-cell">
+                        <div className="am-dblbook">⚠ {pending.conflicts.map((c) => `${c.driver} on #${c.tractor}`).join('; ')} this day.</div>
+                        <div className="am-editor-btns" style={{ marginTop: 4 }}>
+                          <button className="am-save am-save-warn" onClick={() => doCover(pending.route, pending.date, pending.tractor)}>Assign anyway</button>
+                          <button className="am-cancel" onClick={() => setPending(null)}>✕</button>
+                        </div>
+                      </td>
+                    );
+                  }
                   if (editing === kk) {
                     return (
                       <td key={d} className="am-cell">

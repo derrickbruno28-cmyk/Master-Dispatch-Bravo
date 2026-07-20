@@ -3,7 +3,7 @@ import { TERMINALS, TERMINAL_LABELS, ROUTES } from '../data/fleet';
 import { loadFleet, type FleetTruck } from '../data/fleetStore';
 import {
   loadAssignments, setAssignment, moveAssignment, ensureSeed, cellKey, parseCellKey,
-  isoDate, mondayOf, addDays, type Assignment,
+  isoDate, mondayOf, addDays, driverConflicts, type Assignment, type DriverConflict,
 } from '../data/schedule';
 
 /* Asset Matrix — the Bravo-format scheduling board for our OWN trucks.
@@ -132,6 +132,7 @@ export default function AssetMatrixView() {
                 confirmClear={confirmClear}
                 setConfirmClear={setConfirmClear}
                 flash={flash}
+                fleet={fleet}
               />
             ))}
           </tbody>
@@ -141,13 +142,13 @@ export default function AssetMatrixView() {
   );
 }
 
-function TerminalRows({ term, trucks, dates, assign, editing, setEditing, save, move, confirmClear, setConfirmClear, flash }: {
+function TerminalRows({ term, trucks, dates, assign, editing, setEditing, save, move, confirmClear, setConfirmClear, flash, fleet }: {
   term: string; trucks: FleetTruck[]; dates: string[];
   assign: Record<string, Assignment>; editing: string | null;
   setEditing: (k: string | null) => void; save: (k: string, a: Assignment) => void;
   move: (fromKey: string, toKey: string) => void;
   confirmClear: string | null; setConfirmClear: (k: string | null) => void;
-  flash: (msg: string) => void;
+  flash: (msg: string) => void; fleet: FleetTruck[];
 }) {
   return (
     <>
@@ -167,7 +168,7 @@ function TerminalRows({ term, trucks, dates, assign, editing, setEditing, save, 
             const a = assign[k];
             const done = a && (a.status === 'delivered' || a.status === 'completed');
             const nextA = di < dates.length - 1 ? assign[cellKey(t.tractor, dates[di + 1])] : undefined;
-            if (editing === k) return <td key={d} className="am-cell"><CellEditor init={a} onSave={(x) => save(k, x)} onCancel={() => setEditing(null)} /></td>;
+            if (editing === k) return <td key={d} className="am-cell"><CellEditor init={a} conflicts={driverConflicts(t.tractor, d, assign, fleet)} onSave={(x) => save(k, x)} onCancel={() => setEditing(null)} /></td>;
             return (
               <td
                 key={d}
@@ -213,12 +214,15 @@ function TerminalRows({ term, trucks, dates, assign, editing, setEditing, save, 
   );
 }
 
-function CellEditor({ init, onSave, onCancel }: { init?: Assignment; onSave: (a: Assignment) => void; onCancel: () => void }) {
+function CellEditor({ init, conflicts, onSave, onCancel }: { init?: Assignment; conflicts: DriverConflict[]; onSave: (a: Assignment) => void; onCancel: () => void }) {
   const [route, setRoute] = useState(init?.route ?? '');
   const [status, setStatus] = useState<Status>((init?.status as Status) ?? 'covered');
   const [usps, setUsps] = useState(init?.usps ?? true);
   const [uspsTouched, setUspsTouched] = useState(false);
   function changeRoute(v: string) { setRoute(v); if (!uspsTouched) setUsps(looksUSPS(v)); }
+  /* double-booking guard: warn only when actually assigning a route (not clearing);
+     the same cell already held this driver's route, so editing it isn't a new book */
+  const hasConflict = conflicts.length > 0 && !!route.trim();
   return (
     <div className="am-editor" onClick={(e) => e.stopPropagation()}>
       <input className="am-input" autoFocus list="am-routes" placeholder="Pick or type a route…" value={route}
@@ -229,8 +233,13 @@ function CellEditor({ init, onSave, onCancel }: { init?: Assignment; onSave: (a:
         {STATUSES.map((s) => <option key={s} value={s}>{STATUS_LABEL[s]}</option>)}
       </select>
       <label className="am-usps-check"><input type="checkbox" checked={usps} onChange={(e) => { setUsps(e.target.checked); setUspsTouched(true); }} /> USPS contract route</label>
+      {hasConflict && (
+        <div className="am-dblbook">
+          ⚠ Double-book: {conflicts.map((c) => `${c.driver} is already on #${c.tractor} (${c.route.split(' ')[0]})`).join('; ')} this day.
+        </div>
+      )}
       <div className="am-editor-btns">
-        <button className="am-save" onClick={() => onSave({ route, status, usps })}>Save</button>
+        <button className={hasConflict ? 'am-save am-save-warn' : 'am-save'} onClick={() => onSave({ route, status, usps })}>{hasConflict ? 'Assign anyway' : 'Save'}</button>
         <button className="am-clear" onClick={() => onSave({ route: '', status, usps })}>Clear</button>
         <button className="am-cancel" onClick={onCancel}>✕</button>
       </div>
