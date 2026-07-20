@@ -195,3 +195,16 @@
 .am-next { font-size: 9.5px; font-weight: 700; margin-top: 3px; border-radius: 3px; padding: 1px 5px; display: inline-block; }
 .am-next-need { color: var(--red); background: rgba(245,80,90,0.12); border: 1px solid rgba(245,80,90,0.3); }
 .am-next-ok { color: var(--green); background: rgba(16,212,142,0.1); }
+
+/* Master drivers + editable options + shutdown */
+.drv-con { color: var(--amber); font-size: 10px; font-weight: 600; }
+.opt-select-row { display: flex; gap: 4px; align-items: stretch; }
+.opt-select-row select { flex: 1; }
+.opt-add-btn { border: 1px solid var(--border); background: var(--panel); color: var(--accent); border-radius: 6px; padding: 0 9px; font-weight: 800; cursor: pointer; }
+.opt-add-btn:hover { border-color: var(--accent); }
+.fleet-shutdown td { background: rgba(245,80,90,0.08); }
+.fleet-shutdown .am-tractor { color: var(--red); }
+.row-shutdown .am-truckcol { background: rgba(245,80,90,0.1) !important; }
+.am-truck-shutdown .am-tractor, .row-shutdown .am-tractor { color: var(--red); }
+.am-shutdown-tag { margin-left: 6px; font-size: 8.5px; font-weight: 800; color: #fff; background: var(--red); border-radius: 3px; padding: 1px 5px; letter-spacing: 0.3px; }
+.am-teamnote { font-size: 10px; color: var(--amber); margin-top: 3px; }

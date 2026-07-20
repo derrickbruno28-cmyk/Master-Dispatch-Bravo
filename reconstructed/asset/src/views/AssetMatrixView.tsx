@@ -141,12 +141,15 @@ function TerminalRows({ term, trucks, dates, assign, editing, setEditing, save, 
   return (
     <>
       <tr className="am-term"><td colSpan={8}>{TERMINAL_LABELS[term] ?? term} · {trucks.length} trucks</td></tr>
-      {trucks.map((t) => (
-        <tr key={t.tractor}>
+      {trucks.map((t) => {
+        const down = t.status === 'shutdown';
+        return (
+        <tr key={t.tractor} className={down ? 'row-shutdown' : ''}>
           <td className="am-truckcol">
-            <div className="am-tractor">#{t.tractor} <span className="am-rating">{t.rating}</span></div>
+            <div className="am-tractor">#{t.tractor} <span className="am-rating">{t.rating}</span>{down && <span className="am-shutdown-tag">⛔ SHUTDOWN</span>}</div>
             <div className="am-drivers">{[t.driver1, t.driver2].filter(Boolean).join(' · ')}</div>
             <div className="am-ttype">{t.type}</div>
+            {t.constraints && <div className="am-teamnote">📝 {t.constraints}</div>}
           </td>
           {dates.map((d, di) => {
             const k = cellKey(t.tractor, d);
@@ -158,9 +161,9 @@ function TerminalRows({ term, trucks, dates, assign, editing, setEditing, save, 
               <td
                 key={d}
                 className="am-cell"
-                onClick={() => setEditing(k)}
-                onDragOver={(e) => { if (a === undefined) e.preventDefault(); }}
-                onDrop={(e) => { const from = e.dataTransfer.getData('text/plain'); if (from) move(from, k); }}
+                onClick={() => { if (down) { window.alert(`Team #${t.tractor} is in SHUTDOWN — cannot assign a route.`); return; } setEditing(k); }}
+                onDragOver={(e) => { if (a === undefined && !down) e.preventDefault(); }}
+                onDrop={(e) => { if (down) return; const from = e.dataTransfer.getData('text/plain'); if (from) move(from, k); }}
               >
                 {a ? (
                   <div
@@ -186,7 +189,8 @@ function TerminalRows({ term, trucks, dates, assign, editing, setEditing, save, 
             );
           })}
         </tr>
-      ))}
+        );
+      })}
     </>
   );
 }

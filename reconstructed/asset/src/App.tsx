@@ -6,21 +6,23 @@ import RouteOptimizerView from './views/RouteOptimizerView';
 import OTPView from './views/OTPView';
 import CoveredView from './views/CoveredView';
 import FleetStatusView from './views/FleetStatusView';
+import DriversView from './views/DriversView';
 import BravoBoardView from './views/BravoBoardView';
 
 /* Asset Matrix — asset-side sibling of Bravo Matrix. A top-level ⇄ switch flips
    between the two boards (both share one schedule store, so assignments coincide).
    Bravo-only surfaces (Sales Hub, Route Matrix, Dedicated) are deliberately absent. */
 
-const APP_VERSION = '0.2.0';
+const APP_VERSION = '0.3.0';
 
-type Tab = 'matrix' | 'optimizer' | 'otp' | 'covered' | 'fleet';
+type Tab = 'matrix' | 'optimizer' | 'otp' | 'covered' | 'fleet' | 'drivers';
 const TABS: { key: Tab; label: string }[] = [
   { key: 'matrix', label: '🗓 Asset Matrix' },
   { key: 'optimizer', label: '⚡ Route Optimizer' },
   { key: 'otp', label: '📊 OTP / OTD' },
   { key: 'covered', label: '✅ Routes Covered' },
   { key: 'fleet', label: '🚛 Fleet Status' },
+  { key: 'drivers', label: '👤 Drivers' },
 ];
 
 export default function App() {
@@ -80,6 +82,7 @@ export default function App() {
         {tab === 'otp' && <OTPView />}
         {tab === 'covered' && <CoveredView />}
         {tab === 'fleet' && <FleetStatusView />}
+        {tab === 'drivers' && <DriversView />}
       </main>
     </div>
   );
