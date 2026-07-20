@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
-import { TRUCKS, TERMINALS, TERMINAL_LABELS, ROUTES, type Truck } from '../data/fleet';
+import { TERMINALS, TERMINAL_LABELS, ROUTES } from '../data/fleet';
+import { loadFleet, type FleetTruck } from '../data/fleetStore';
 import {
   loadAssignments, setAssignment, moveAssignment, ensureSeed, cellKey, parseCellKey,
   isoDate, mondayOf, addDays, type Assignment,
@@ -11,15 +12,15 @@ import {
    All reads/writes go through data/schedule (browser today, shared Firestore
    when configured — USPS assignments then coincide with Bravo). */
 
-type Status = 'open' | 'covered' | 'dispatched' | 'departed' | 'delivered' | 'off';
-const STATUSES: Status[] = ['open', 'covered', 'dispatched', 'departed', 'delivered', 'off'];
+type Status = 'open' | 'covered' | 'dispatched' | 'departed' | 'delivered' | 'completed' | 'off';
+const STATUSES: Status[] = ['open', 'covered', 'dispatched', 'departed', 'delivered', 'completed', 'off'];
 const STATUS_COLOR: Record<string, string> = {
   open: 'var(--muted)', covered: 'var(--green)', dispatched: '#00b8d4',
-  departed: 'var(--accent)', delivered: '#6b7f9e', off: 'var(--panel-2)',
+  departed: 'var(--accent)', delivered: '#6b7f9e', completed: '#a78bfa', off: 'var(--panel-2)',
 };
 const STATUS_LABEL: Record<string, string> = {
   open: 'Open', covered: 'Covered', dispatched: 'Dispatched',
-  departed: 'Departed', delivered: 'Delivered', off: 'Off / Home',
+  departed: 'Departed', delivered: 'Delivered', completed: 'Completed', off: 'Off / Home',
 };
 
 const DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
@@ -31,22 +32,23 @@ export default function AssetMatrixView() {
   const [assign, setAssign] = useState<Record<string, Assignment>>(() => { ensureSeed(); return loadAssignments(); });
   const [editing, setEditing] = useState<string | null>(null);
   const [termFilter, setTermFilter] = useState<string>('ALL');
+  const fleet = useMemo(() => loadFleet(), []);
 
   const dates = useMemo(() => DAYS.map((_, i) => isoDate(addDays(weekStart, i))), [weekStart]);
   const shownTerminals: string[] = termFilter === 'ALL' ? [...TERMINALS] : [termFilter];
   const dayCounts = useMemo(
-    () => dates.map((d) => TRUCKS.filter((t) => shownTerminals.includes(t.homeCity))
+    () => dates.map((d) => fleet.filter((t) => shownTerminals.includes(t.homeCity))
       .reduce((n, t) => n + (assign[cellKey(t.tractor, d)] ? 1 : 0), 0)),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [dates, assign, termFilter],
   );
   const weekTotal = dayCounts.reduce((a, b) => a + b, 0);
   const byTerminal = useMemo(() => {
-    const m: Record<string, Truck[]> = {};
+    const m: Record<string, FleetTruck[]> = {};
     for (const term of TERMINALS) m[term] = [];
-    for (const t of TRUCKS) (m[t.homeCity] ?? (m[t.homeCity] = [])).push(t);
+    for (const t of fleet) (m[t.homeCity] ?? (m[t.homeCity] = [])).push(t);
     return m;
-  }, []);
+  }, [fleet]);
 
   const weekLabel = `${weekStart.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} – ${addDays(weekStart, 6).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}`;
 
@@ -131,7 +133,7 @@ export default function AssetMatrixView() {
 }
 
 function TerminalRows({ term, trucks, dates, assign, editing, setEditing, save, move }: {
-  term: string; trucks: Truck[]; dates: string[];
+  term: string; trucks: FleetTruck[]; dates: string[];
   assign: Record<string, Assignment>; editing: string | null;
   setEditing: (k: string | null) => void; save: (k: string, a: Assignment) => void;
   move: (fromKey: string, toKey: string) => void;
@@ -146,9 +148,11 @@ function TerminalRows({ term, trucks, dates, assign, editing, setEditing, save, 
             <div className="am-drivers">{[t.driver1, t.driver2].filter(Boolean).join(' · ')}</div>
             <div className="am-ttype">{t.type}</div>
           </td>
-          {dates.map((d) => {
+          {dates.map((d, di) => {
             const k = cellKey(t.tractor, d);
             const a = assign[k];
+            const done = a && (a.status === 'delivered' || a.status === 'completed');
+            const nextA = di < dates.length - 1 ? assign[cellKey(t.tractor, dates[di + 1])] : undefined;
             if (editing === k) return <td key={d} className="am-cell"><CellEditor init={a} onSave={(x) => save(k, x)} onCancel={() => setEditing(null)} /></td>;
             return (
               <td
@@ -173,6 +177,9 @@ function TerminalRows({ term, trucks, dates, assign, editing, setEditing, save, 
                       {a.usps && <span className="am-bravo" title="USPS contract — coincides with Bravo Matrix">⇄ Bravo</span>}
                     </div>
                     <div className="am-status" style={{ color: STATUS_COLOR[a.status] }}>{STATUS_LABEL[a.status] ?? a.status}</div>
+                    {done && (nextA
+                      ? <div className="am-next am-next-ok">→ next: {nextA.route.split(' ')[0]}</div>
+                      : <div className="am-next am-next-need">🔴 Needs next load</div>)}
                   </div>
                 ) : <span className="am-add">+</span>}
               </td>

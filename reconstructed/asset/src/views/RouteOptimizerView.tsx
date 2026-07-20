@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { TRUCKS } from '../data/fleet';
+import { loadFleet } from '../data/fleetStore';
 import { getMatches, type Match } from '../data/optimize';
 import { setAssignment, isoDate } from '../data/schedule';
 
@@ -10,6 +10,7 @@ import { setAssignment, isoDate } from '../data/schedule';
 const RADII = [150, 250, 500, 1000];
 
 export default function RouteOptimizerView() {
+  const TRUCKS = useMemo(() => loadFleet(), []);
   const [tractor, setTractor] = useState<string>(TRUCKS[0]?.tractor ?? '');
   const [radius, setRadius] = useState(250);
   const [homeward, setHomeward] = useState(false);

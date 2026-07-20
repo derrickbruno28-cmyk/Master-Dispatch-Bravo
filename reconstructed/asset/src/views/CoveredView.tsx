@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { TRUCKS } from '../data/fleet';
+import { loadFleet } from '../data/fleetStore';
 import { loadAssignments, parseCellKey } from '../data/schedule';
 
 /* Routes Covered — DERIVED live from the Asset Matrix assignments (Bravo's
@@ -16,7 +16,7 @@ const COVERED = new Set(['covered', 'dispatched', 'departed', 'delivered']);
 
 function loadRows(): Row[] {
   const data = loadAssignments();
-  const byId = new Map(TRUCKS.map((t) => [t.tractor, t]));
+  const byId = new Map(loadFleet().map((t) => [t.tractor, t]));
   const rows: Row[] = [];
   for (const [k, a] of Object.entries(data)) {
     if (!a.route?.trim()) continue;
