@@ -86,13 +86,13 @@ export async function signInWithGoogle(): Promise<User> {
   if (!auth) throw new Error('Firebase not configured');
   const provider = new GoogleAuthProvider();
   /* no `hd` hint — it only supports a single domain, and partners sign in too */
-  const user = await popupOrRedirect(provider);
-  const email = user.email ?? '';
-  if (!isCompanyEmail(email)) {
-    await fbSignOut(auth);
-    throw new Error(`Access restricted to ${ALLOWED_DOMAINS.map((d) => `@${d}`).join(' / ')} accounts.`);
-  }
-  return user;
+  /* Redirect-primary: popups are fragile on phones and in privacy-hardened
+     desktop browsers (they surface as auth/popup-closed-by-user even when the
+     user did nothing). A full-page redirect works identically everywhere; the
+     work-email allowlist is enforced on the way back in AuthGate
+     (getRedirectResult + onAuthStateChanged → isCompanyEmail). */
+  await signInWithRedirect(auth, provider); // navigates away; page reloads
+  return new Promise<User>(() => {}); // unreachable — the redirect reloads the page
 }
 
 export async function signOut(): Promise<void> {
