@@ -1,0 +1,15 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Only signed-in GH Logistics / AJG Transport work accounts can read or write.
+    function isCompany() {
+      return request.auth != null
+        && request.auth.token.email_verified == true
+        && (request.auth.token.email.matches('.*@ghlogisticsllc[.]com$')
+            || request.auth.token.email.matches('.*@ajgtransport[.]com$'));
+    }
+    match /{document=**} {
+      allow read, write: if isCompany();
+    }
+  }
+}
