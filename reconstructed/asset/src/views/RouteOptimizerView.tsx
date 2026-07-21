@@ -210,7 +210,7 @@ export default function RouteOptimizerView() {
                     <tbody>
                       {matches.map((m) => (
                         <tr key={m.route} className={m.ok ? '' : 'opt-overhrs'}>
-                          <td className="opt-dh">{m.dh <= 20 ? <span className="opt-dh-here">picks up here</span> : <><b>{m.dh}</b> mi</>}</td>
+                          <td className="opt-dh"><b>{m.dh}</b> mi</td>
                           <td className="opt-route">{m.oN || m.route}<span className="am-muted"> · {m.planning}</span></td>
                           <td className="opt-putime">{m.puTime || m.departure || '—'}</td>
                           <td className="opt-dest"><b>{m.dN || '—'}</b></td>
