@@ -27,13 +27,20 @@ export function isCompanyEmail(email: string): boolean {
   return ALLOWED_DOMAINS.some((d) => email.endsWith(`@${d}`));
 }
 
+/* Config resolves at RUNTIME from public/firebase-config.js (window.__ASSET_FB__)
+   so a pre-built app can be pointed at a Firebase project by editing one text
+   file — no rebuild. Falls back to Vite build-time env for local dev. Empty
+   values → demo mode (no backend, localStorage only). */
+type FbCfg = Partial<Record<'apiKey' | 'authDomain' | 'projectId' | 'storageBucket' | 'messagingSenderId' | 'appId', string>>;
+const rt: FbCfg = (typeof window !== 'undefined' && (window as unknown as { __ASSET_FB__?: FbCfg }).__ASSET_FB__) || {};
+const val = (k: keyof FbCfg, env: string | undefined) => (rt[k] && rt[k] !== `PASTE_${k}` ? rt[k] : env) || '';
 const cfg = {
-  apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
-  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
-  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
-  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
-  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
-  appId: import.meta.env.VITE_FIREBASE_APP_ID,
+  apiKey: val('apiKey', import.meta.env.VITE_FIREBASE_API_KEY),
+  authDomain: val('authDomain', import.meta.env.VITE_FIREBASE_AUTH_DOMAIN),
+  projectId: val('projectId', import.meta.env.VITE_FIREBASE_PROJECT_ID),
+  storageBucket: val('storageBucket', import.meta.env.VITE_FIREBASE_STORAGE_BUCKET),
+  messagingSenderId: val('messagingSenderId', import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID),
+  appId: val('appId', import.meta.env.VITE_FIREBASE_APP_ID),
 };
 
 export const firebaseEnabled = !!cfg.apiKey && !!cfg.projectId;
