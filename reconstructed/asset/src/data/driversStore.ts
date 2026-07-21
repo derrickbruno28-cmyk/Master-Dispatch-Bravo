@@ -5,6 +5,7 @@
 
 import { loadFleet } from './fleetStore';
 import { loadAssignments, parseCellKey } from './schedule';
+import { emitChange } from './bus';
 
 export interface Driver {
   id: string;
@@ -35,7 +36,15 @@ function read(): Driver[] {
 function norm(d: Partial<Driver>): Driver {
   return { id: d.id ?? `drv-${Math.random().toString(36).slice(2)}`, name: d.name ?? '', position: d.position ?? 'OTR Team', address: d.address ?? '', phone: d.phone ?? '', constraints: d.constraints ?? '', readyDate: d.readyDate ?? '', returnDate: d.returnDate ?? '', pattern: d.pattern ?? '' };
 }
-function write(list: Driver[]) { try { localStorage.setItem(KEY, JSON.stringify(list)); } catch { /* ignore */ } }
+function write(list: Driver[]) { try { localStorage.setItem(KEY, JSON.stringify(list)); } catch { /* ignore */ } emitChange(); }
+
+/* The team status of the truck this driver is on (NTB / Deadhead / …), so the
+   drivers list can stay congruent with the Fleet card and the Matrix. */
+export function teamStatusOf(name: string): string {
+  const n = name.trim().toLowerCase(); if (!n) return '';
+  const t = loadFleet().find((x) => x.driver1.toLowerCase() === n || x.driver2.toLowerCase() === n);
+  return t?.status ?? '';
+}
 
 function seedFromFleet(): Driver[] {
   const seen = new Set<string>(); const out: Driver[] = [];

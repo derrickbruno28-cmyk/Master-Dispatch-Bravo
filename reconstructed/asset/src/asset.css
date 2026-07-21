@@ -294,3 +294,17 @@
 .am-lockmsg.bad { color: var(--red); }
 .am-lockmanage { border-top: 1px solid var(--border); padding-top: 8px; display: flex; flex-direction: column; gap: 5px; }
 .am-lockperson { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 11.5px; }
+
+/* ---- optimizer: editable launch + HOS, NTB priority ---- */
+.opt-inputs { display: flex; gap: 10px; flex-wrap: wrap; }
+.opt-field { display: flex; flex-direction: column; gap: 2px; }
+.opt-field .am-input { min-width: 150px; }
+.opt-field span { font-size: 10px; text-transform: uppercase; letter-spacing: 0.4px; }
+.opt-controls-row2 { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+.opt-truck-badges { display: inline-flex; align-items: center; gap: 7px; }
+.opt-tstatus { font-size: 9.5px; font-weight: 800; letter-spacing: 0.2px; }
+.opt-truck.ntb { border-color: rgba(232,89,12,0.55); background: rgba(232,89,12,0.06); }
+.opt-truck.ntb.on { background: rgba(232,89,12,0.13); }
+
+/* ---- NTB chip on the drivers list ---- */
+.drv-ntb { font-size: 10px; font-weight: 800; letter-spacing: 0.3px; color: #fff; background: #e8590c; border-radius: 4px; padding: 2px 7px; }

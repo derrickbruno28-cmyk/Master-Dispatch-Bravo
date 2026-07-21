@@ -1,15 +1,17 @@
 /* Editable dropdown option lists. Defaults ship in code; the user can add more
    options (truck type, home terminal, team status) and they persist. */
 
-import { TRUCK_TYPES, TEAM_STATUS_OPTIONS } from './fleetStore';
+import { TRUCK_TYPES, TEAM_STATUS_OPTIONS, DEADHEAD_HUBS } from './fleetStore';
 import { TERMINALS } from './fleet';
+import { emitChange } from './bus';
 
-export type OptionKind = 'type' | 'terminal' | 'status';
+export type OptionKind = 'type' | 'terminal' | 'status' | 'deadhead';
 
 const DEFAULTS: Record<OptionKind, string[]> = {
   type: [...TRUCK_TYPES],
   terminal: [...TERMINALS],
   status: [...TEAM_STATUS_OPTIONS],
+  deadhead: [...DEADHEAD_HUBS],
 };
 
 const KEY = 'asset-options-v1';
@@ -34,6 +36,7 @@ export function addOption(kind: OptionKind, value: string): string[] {
   if (![...DEFAULTS[kind], ...list].some((o) => o.toLowerCase() === v.toLowerCase())) {
     all[kind] = [...list, v];
     writeCustom(all);
+    emitChange();
   }
   return getOptions(kind);
 }

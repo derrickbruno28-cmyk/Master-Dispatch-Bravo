@@ -1,6 +1,7 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { TERMINALS, TERMINAL_LABELS, ROUTES } from '../data/fleet';
 import { loadFleet, teamStatusMeta, isShutdown, type FleetTruck } from '../data/fleetStore';
+import { onChange } from '../data/bus';
 import {
   loadAssignments, setAssignment, moveAssignment, ensureSeed, cellKey, parseCellKey,
   isoDate, mondayOf, addDays, driverConflicts, type Assignment, type DriverConflict,
@@ -14,15 +15,19 @@ import { canDelete, sessionEmail, isOwner, unlock, clearSession, authorizedDelet
    editable assignment. Adding/editing loads is open; DELETING a load is gated
    behind delete access. All reads/writes go through data/schedule. */
 
-type Status = 'open' | 'covered' | 'dispatched' | 'departed' | 'delivered' | 'completed' | 'off';
-const STATUSES: Status[] = ['open', 'covered', 'dispatched', 'departed', 'delivered', 'completed', 'off'];
+/* Load lifecycle on a matrix cell: covered → dispatched → at shipper → at yard →
+   en route → at receiver → delivered → completed (off = home/reset). */
+const STATUSES = ['open', 'covered', 'dispatched', 'at shipper', 'at yard', 'en route', 'at receiver', 'delivered', 'completed', 'off'] as const;
+type Status = typeof STATUSES[number];
 const STATUS_COLOR: Record<string, string> = {
   open: 'var(--muted)', covered: 'var(--green)', dispatched: '#00b8d4',
-  departed: 'var(--accent)', delivered: '#6b7f9e', completed: '#a78bfa', off: 'var(--panel-2)',
+  'at shipper': '#e8a33d', 'at yard': '#b0842a', 'en route': 'var(--accent)',
+  'at receiver': '#7c5cff', delivered: '#6b7f9e', completed: '#a78bfa', off: 'var(--panel-2)',
 };
 const STATUS_LABEL: Record<string, string> = {
   open: 'Open', covered: 'Covered', dispatched: 'Dispatched',
-  departed: 'Departed', delivered: 'Delivered', completed: 'Completed', off: 'Off / Home',
+  'at shipper': 'At Shipper', 'at yard': 'At Yard', 'en route': 'En Route',
+  'at receiver': 'At Receiver', delivered: 'Delivered', completed: 'Completed', off: 'Off / Home',
 };
 
 const DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
@@ -37,7 +42,11 @@ export default function AssetMatrixView() {
   const [confirmClear, setConfirmClear] = useState<string | null>(null);
   const [notice, setNotice] = useState<string>('');
   const [canDel, setCanDel] = useState<boolean>(() => canDelete());
-  const fleet = useMemo(() => loadFleet(), []);
+  const [fleet, setFleet] = useState<FleetTruck[]>(() => loadFleet());
+
+  /* live sync: reload fleet + assignments whenever any store changes (e.g. a team
+     is set NTB on the Fleet card) so the matrix stays congruent without a reload */
+  useEffect(() => onChange(() => { setFleet(loadFleet()); setAssign(loadAssignments()); }), []);
 
   /* transient inline notice — replaces window.alert (blocked in sandboxes) */
   function flash(msg: string) { setNotice(msg); window.setTimeout(() => setNotice(''), 3200); }
@@ -163,14 +172,16 @@ function TerminalRows({ term, trucks, dates, assign, editing, setEditing, save, 
       {trucks.map((t) => {
         const down = isShutdown(t.status);
         const meta = teamStatusMeta(t.status);
-        const rowCls = down ? 'row-shutdown' : (t.status || '').trim().toLowerCase() === 'ntb' ? 'row-ntb' : (t.status || '').trim().toLowerCase() === 'deadhead' ? 'row-deadhead' : '';
+        const sLower = (t.status || '').trim().toLowerCase();
+        const statusLabel = sLower === 'deadhead' && (t.deadheadTo || '').trim() ? `Deadhead → ${t.deadheadTo}` : meta.label;
+        const rowCls = down ? 'row-shutdown' : sLower === 'ntb' ? 'row-ntb' : sLower === 'deadhead' ? 'row-deadhead' : '';
         return (
         <tr key={t.tractor} className={rowCls}>
           <td className="am-truckcol">
             <div className="am-tractor">#{t.tractor} <span className="am-rating">{t.rating}</span></div>
             <div className="am-drivers">{[t.driver1, t.driver2].filter(Boolean).join(' · ')}</div>
             <div className="am-ttype">{t.type}</div>
-            {meta.onMatrix && <div className="am-teamstatus" style={{ color: meta.color, background: meta.tint }}>{meta.label}</div>}
+            {meta.onMatrix && <div className="am-teamstatus" style={{ color: meta.color, background: meta.tint }}>{statusLabel}</div>}
             {t.constraints && <div className="am-teamnote">📝 {t.constraints}</div>}
           </td>
           {dates.map((d, di) => {

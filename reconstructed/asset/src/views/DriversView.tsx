@@ -1,9 +1,11 @@
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   loadDrivers, saveDriver, removeDriver, blankDriver, importDriversCsv,
   availabilityOf, daysUntil, AVAIL_PATTERNS,
   DEFAULT_POSITIONS, type Driver,
 } from '../data/driversStore';
+import { loadFleet } from '../data/fleetStore';
+import { onChange } from '../data/bus';
 
 /* Master Drivers List — the driver-availability hub. Every driver carries a
    ready-to-go date, a return-home date, and a weekly availability pattern.
@@ -28,8 +30,19 @@ export default function DriversView() {
   const [confirmDel, setConfirmDel] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
+  /* live sync — a team going NTB on the Fleet card / Matrix reflects here too */
+  useEffect(() => onChange(() => setDrivers(loadDrivers())), []);
+
   /* live availability for every driver, recomputed whenever the roster changes */
   const avail = useMemo(() => new Map(drivers.map((d) => [d.id, availabilityOf(d)])), [drivers]);
+
+  /* each driver's team status (NTB / Deadhead / …) so the list stays congruent
+     with the Fleet card and the Matrix */
+  const teamStatusByName = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const t of loadFleet()) for (const nm of [t.driver1, t.driver2]) if ((nm || '').trim()) m.set(nm.trim().toLowerCase(), t.status);
+    return m;
+  }, [drivers]);
 
   const positions = useMemo(() => {
     const s = new Set<string>(DEFAULT_POSITIONS);
@@ -175,7 +188,9 @@ export default function DriversView() {
                   <td className="am-tractor">{d.name}</td>
                   <td><span className="am-pill" style={{ color: 'var(--accent)' }}>{d.position}</span></td>
                   <td>
-                    {a.assigned ? (
+                    {(teamStatusByName.get(d.name.trim().toLowerCase()) || '').toLowerCase() === 'ntb' ? (
+                      <span className="drv-ntb" title="This driver's team is Need-To-Book — needs a load">NTB — needs load</span>
+                    ) : a.assigned ? (
                       <span className="drv-assigned" title={`On ${a.assigned.route} (#${a.assigned.tractor}) ${a.assigned.date}`}>ASSIGNED</span>
                     ) : a.available ? (
                       <span className="drv-avail"><span className="drv-led" /> Available</span>

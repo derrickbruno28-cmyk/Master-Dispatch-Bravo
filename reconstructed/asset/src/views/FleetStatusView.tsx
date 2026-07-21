@@ -105,7 +105,7 @@ function OptSelect({ kind, value, onChange }: { kind: OptionKind; value: string;
     <div className="opt-select-wrap">
       <div className="opt-select-row">
         <select className="am-input" value={value} onChange={(e) => onChange(e.target.value)}>
-          {!opts.includes(value) && value && <option value={value}>{value}</option>}
+          {!opts.some((o) => o.toLowerCase() === value.toLowerCase()) && value && <option value={value}>{value}</option>}
           {opts.map((o) => <option key={o} value={o}>{o}</option>)}
         </select>
         <button type="button" className="opt-add-btn" title={`Add a ${kind} option`} onClick={() => setAdding((a) => !a)}>＋</button>
@@ -143,6 +143,11 @@ function TruckEditor({ truck, isNew, onSave, onCancel }: { truck: FleetTruck; is
           <L t="Current city (empty / standby location)"><input className="am-input" value={t.currentCity} onChange={(e) => f('currentCity', e.target.value.toUpperCase())} /></L>
           <L t="Hours available"><input className="am-input" type="number" value={t.hoursAvail} onChange={(e) => f('hoursAvail', Number(e.target.value))} /></L>
           <L t="Team status (NTB = needs load · Deadhead · Shutdown blocks dispatch · shows on the Matrix)"><OptSelect kind="status" value={t.status} onChange={(v) => f('status', v)} /></L>
+          {t.status.trim().toLowerCase() === 'deadhead' && (
+            <L t="Deadhead to (hub / city — feeds the Route Optimizer's next-load launch point)">
+              <OptSelect kind="deadhead" value={t.deadheadTo || ''} onChange={(v) => f('deadheadTo', v)} />
+            </L>
+          )}
         </div>
         <datalist id="fleet-drivers">{names.map((n) => <option key={n} value={n} />)}</datalist>
         <L t="Team / route notes (shows on the Asset Matrix)">

@@ -3,12 +3,14 @@
    shape moves to shared Firestore later (like the schedule store). */
 
 import { TRUCKS as SEED, TERMINALS, TERMINAL_LABELS } from './fleet';
+import { emitChange } from './bus';
 
 export interface FleetTruck {
   tractor: string; rating: string; driver1: string; driver2: string;
   type: string; currentCity: string; homeCity: string; returnDate: string;
   hoursAvail: number; status: string; currentRoute: string;
   constraints: string;      // per-team dispatch constraints (free text)
+  deadheadTo?: string;      // when status = Deadhead, the hub/city they're returning to
 }
 
 export { TERMINALS, TERMINAL_LABELS };
@@ -16,11 +18,12 @@ export { TERMINALS, TERMINAL_LABELS };
 const KEY = 'asset-fleet-v1';
 
 function read(): FleetTruck[] {
-  try { const r = localStorage.getItem(KEY); if (r) return JSON.parse(r) as FleetTruck[]; } catch { /* ignore */ }
-  return SEED.map((t) => ({ ...t, constraints: '' }));
+  try { const r = localStorage.getItem(KEY); if (r) return (JSON.parse(r) as FleetTruck[]).map((t) => ({ deadheadTo: '', ...t })); } catch { /* ignore */ }
+  return SEED.map((t) => ({ ...t, constraints: '', deadheadTo: '' }));
 }
 function write(list: FleetTruck[]) {
   try { localStorage.setItem(KEY, JSON.stringify(list)); } catch { /* ignore */ }
+  emitChange();
 }
 
 export function loadFleet(): FleetTruck[] { return read(); }
@@ -43,7 +46,7 @@ export function blankTruck(): FleetTruck {
   return {
     tractor: '', rating: 'A', driver1: '', driver2: '', type: 'OTR Team',
     currentCity: 'DALLAS', homeCity: 'DALLAS', returnDate: '', hoursAvail: 70,
-    status: 'NTB', currentRoute: '', constraints: '',
+    status: 'NTB', currentRoute: '', constraints: '', deadheadTo: '',
   };
 }
 
@@ -55,8 +58,11 @@ export const TRUCK_TYPES = ['OTR Team', 'OTR Solo', 'OMNI Weekly Team', 'Memphis
    NTB = Need To Book → the team needs a load. Deadhead → running empty back toward a
    hub (SATX / Dallas / Memphis) to grab their next load. Shutdown blocks dispatch. */
 export const TEAM_STATUS_OPTIONS = [
-  'NTB', 'Dispatched', 'En Route', 'Delivering', 'Deadhead', 'On 34hr Reset', 'Shutdown',
+  'NTB', 'Dispatched', 'En Route', 'Deadhead', 'On 34hr Reset', 'Shutdown',
 ];
+
+/* Hubs a team can deadhead back to (editable — add your own destinations too). */
+export const DEADHEAD_HUBS = ['San Antonio TX', 'Dallas TX', 'Memphis TN'];
 
 export interface TeamStatusMeta { label: string; color: string; tint?: string; blocks?: boolean; onMatrix?: boolean }
 export function teamStatusMeta(status: string): TeamStatusMeta {

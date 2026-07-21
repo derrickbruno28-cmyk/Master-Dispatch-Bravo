@@ -12,6 +12,7 @@
 
 import { db, firebaseEnabled } from '../firebase';
 import { collection, deleteDoc, doc, onSnapshot, query, setDoc, where } from 'firebase/firestore';
+import { emitChange } from './bus';
 
 export interface Assignment { route: string; status: string; usps: boolean }
 
@@ -34,6 +35,7 @@ function readLocal(): Record<string, Assignment> {
 }
 function writeLocal(map: Record<string, Assignment>) {
   try { localStorage.setItem(LS_KEY, JSON.stringify(map)); } catch { /* ignore */ }
+  emitChange();
 }
 
 /* Demo seed so the board isn't empty on first run. */
