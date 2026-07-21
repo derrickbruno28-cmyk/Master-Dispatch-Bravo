@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import {
-  loadFleet, saveTruck, removeTruck, blankTruck, TERMINAL_LABELS,
+  loadFleet, saveTruck, removeTruck, blankTruck, TERMINAL_LABELS, teamStatusMeta, isShutdown,
   type FleetTruck,
 } from '../data/fleetStore';
 import { driverNames, driverByName } from '../data/driversStore';
@@ -10,12 +10,9 @@ import { getOptions, addOption, type OptionKind } from '../data/optionsStore';
    autofill from the Master Drivers List; the Type / Home terminal / Status
    dropdowns are editable (add your own options). The bottom box is TEAM / ROUTE
    NOTES (driver constraints live on the Master Drivers List and show next to the
-   driver's name). Set Status = "shutdown" to red-flag the team and block dispatch. */
-
-const STATUS_CLR: Record<string, string> = {
-  dispatched: 'var(--green)', 'en route': 'var(--accent)', delivering: 'var(--amber)',
-  'on 34hr reset': 'var(--red)', available: '#00b8d4', shutdown: 'var(--red)',
-};
+   driver's name). The team STATUS (NTB / Deadhead / Dispatched / Shutdown …) is set
+   here and shows as a badge on that team's row in the Asset Matrix — NTB flags a
+   team that needs a load; Shutdown red-flags the team and blocks dispatch. */
 
 function withConstraint(name: string): React.ReactNode {
   const c = driverByName(name)?.constraints;
@@ -57,14 +54,14 @@ export default function FleetStatusView() {
           </thead>
           <tbody>
             {rows.map((t) => (
-              <tr key={t.tractor} className={t.status === 'shutdown' ? 'fleet-shutdown' : ''}>
+              <tr key={t.tractor} className={isShutdown(t.status) ? 'fleet-shutdown' : ''}>
                 <td className="am-tractor">#{t.tractor} <span className="am-rating">{t.rating}</span></td>
                 <td>{[t.driver1, t.driver2].filter(Boolean).map((n, i) => <span key={i}>{i > 0 && ' · '}{withConstraint(n)}</span>)}{!t.driver1 && !t.driver2 && <span className="am-muted">—</span>}</td>
                 <td className="am-muted">{t.type}</td>
                 <td>{TERMINAL_LABELS[t.homeCity] ?? t.homeCity}</td>
                 <td className="am-muted">{t.currentCity}</td>
                 <td style={{ color: t.hoursAvail === 0 ? 'var(--red)' : t.hoursAvail < 20 ? 'var(--amber)' : 'var(--green)' }}>{t.hoursAvail}</td>
-                <td><span className="am-pill" style={{ color: STATUS_CLR[t.status] ?? 'var(--text)' }}>{t.status === 'shutdown' ? '⛔ shutdown' : t.status}</span></td>
+                <td><span className="am-pill" style={{ color: teamStatusMeta(t.status).color }}>{teamStatusMeta(t.status).label}</span></td>
                 <td className="fleet-constraints">{t.constraints || <span className="am-muted">—</span>}</td>
                 <td className="fleet-actions">
                   {confirmDel === t.tractor ? (
@@ -145,7 +142,7 @@ function TruckEditor({ truck, isNew, onSave, onCancel }: { truck: FleetTruck; is
           <L t="Home terminal"><OptSelect kind="terminal" value={t.homeCity} onChange={(v) => f('homeCity', v)} /></L>
           <L t="Current city (empty / standby location)"><input className="am-input" value={t.currentCity} onChange={(e) => f('currentCity', e.target.value.toUpperCase())} /></L>
           <L t="Hours available"><input className="am-input" type="number" value={t.hoursAvail} onChange={(e) => f('hoursAvail', Number(e.target.value))} /></L>
-          <L t="Status (set 'shutdown' to block dispatch)"><OptSelect kind="status" value={t.status} onChange={(v) => f('status', v)} /></L>
+          <L t="Team status (NTB = needs load · Deadhead · Shutdown blocks dispatch · shows on the Matrix)"><OptSelect kind="status" value={t.status} onChange={(v) => f('status', v)} /></L>
         </div>
         <datalist id="fleet-drivers">{names.map((n) => <option key={n} value={n} />)}</datalist>
         <L t="Team / route notes (shows on the Asset Matrix)">

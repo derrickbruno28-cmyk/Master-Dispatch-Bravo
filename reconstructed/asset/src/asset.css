@@ -274,3 +274,23 @@
 /* ---- Route Optimizer: pickup-here badge + PU time ---- */
 .opt-dh-here { font-size: 9.5px; font-weight: 800; color: var(--green); background: rgba(16,212,142,0.14); border: 1px solid rgba(16,212,142,0.4); border-radius: 4px; padding: 1px 6px; white-space: nowrap; }
 .opt-putime { font-variant-numeric: tabular-nums; color: var(--text); }
+
+/* ---- team status on the matrix row ---- */
+.am-teamstatus { display: inline-block; margin-top: 3px; font-size: 9.5px; font-weight: 800; letter-spacing: 0.2px; border-radius: 4px; padding: 1px 6px; }
+.row-ntb .am-truckcol { background: rgba(232,89,12,0.09) !important; }
+.row-deadhead .am-truckcol { background: rgba(0,184,212,0.08) !important; }
+
+/* ---- delete-access control (matrix legend) ---- */
+.am-delaccess { position: relative; display: inline-flex; }
+.am-lockbtn { border: 1px solid var(--border); background: var(--panel); color: var(--muted); border-radius: 999px; padding: 3px 10px; font: inherit; font-size: 10.5px; font-weight: 700; cursor: pointer; white-space: nowrap; }
+.am-lockbtn:hover { border-color: var(--accent); color: var(--text); }
+.am-lockbtn.unlocked { color: var(--green); border-color: rgba(16,212,142,0.5); }
+.am-lockpanel { position: absolute; top: 26px; right: 0; z-index: 40; width: 300px; background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 11px 12px; box-shadow: 0 8px 28px rgba(0,0,0,0.28); display: flex; flex-direction: column; gap: 8px; }
+.am-lockrow { font-size: 11.5px; color: var(--text); line-height: 1.45; }
+.am-lockbtns { display: flex; gap: 6px; align-items: center; }
+.am-lockbtns .am-input { flex: 1; }
+.am-lockmsg { font-size: 11px; font-weight: 600; }
+.am-lockmsg.ok { color: var(--green); }
+.am-lockmsg.bad { color: var(--red); }
+.am-lockmanage { border-top: 1px solid var(--border); padding-top: 8px; display: flex; flex-direction: column; gap: 5px; }
+.am-lockperson { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 11.5px; }

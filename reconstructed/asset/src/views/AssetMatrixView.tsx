@@ -1,16 +1,18 @@
 import { useMemo, useState } from 'react';
 import { TERMINALS, TERMINAL_LABELS, ROUTES } from '../data/fleet';
-import { loadFleet, type FleetTruck } from '../data/fleetStore';
+import { loadFleet, teamStatusMeta, isShutdown, type FleetTruck } from '../data/fleetStore';
 import {
   loadAssignments, setAssignment, moveAssignment, ensureSeed, cellKey, parseCellKey,
   isoDate, mondayOf, addDays, driverConflicts, type Assignment, type DriverConflict,
 } from '../data/schedule';
+import { canDelete, sessionEmail, isOwner, unlock, clearSession, authorizedDeleters, addAuthorized, removeAuthorized } from '../data/permStore';
 
-/* Asset Matrix — the Bravo-format scheduling board for our OWN trucks.
-   Rows = trucks grouped by home terminal (SA / Dallas / Memphis / Houston);
-   columns = days Mon→Sun, left→right; every cell is an editable assignment.
-   All reads/writes go through data/schedule (browser today, shared Firestore
-   when configured — USPS assignments then coincide with Bravo). */
+/* Asset Matrix — the scheduling board for our OWN trucks.
+   Rows = trucks grouped by home terminal (SA / Dallas / Memphis / Houston),
+   each tagged with its live team status (NTB / Deadhead / Dispatched / Shutdown …
+   set on the Fleet card); columns = days Mon→Sun, left→right; every cell is an
+   editable assignment. Adding/editing loads is open; DELETING a load is gated
+   behind delete access. All reads/writes go through data/schedule. */
 
 type Status = 'open' | 'covered' | 'dispatched' | 'departed' | 'delivered' | 'completed' | 'off';
 const STATUSES: Status[] = ['open', 'covered', 'dispatched', 'departed', 'delivered', 'completed', 'off'];
@@ -34,10 +36,11 @@ export default function AssetMatrixView() {
   const [termFilter, setTermFilter] = useState<string>('ALL');
   const [confirmClear, setConfirmClear] = useState<string | null>(null);
   const [notice, setNotice] = useState<string>('');
+  const [canDel, setCanDel] = useState<boolean>(() => canDelete());
   const fleet = useMemo(() => loadFleet(), []);
 
   /* transient inline notice — replaces window.alert (blocked in sandboxes) */
-  function flash(msg: string) { setNotice(msg); window.setTimeout(() => setNotice(''), 2600); }
+  function flash(msg: string) { setNotice(msg); window.setTimeout(() => setNotice(''), 3200); }
 
   const dates = useMemo(() => DAYS.map((_, i) => isoDate(addDays(weekStart, i))), [weekStart]);
   const shownTerminals: string[] = termFilter === 'ALL' ? [...TERMINALS] : [termFilter];
@@ -60,6 +63,8 @@ export default function AssetMatrixView() {
   function save(k: string, a: Assignment) {
     const { tractor, date } = parseCellKey(k);
     const clear = !a.route.trim();
+    /* delete gate: clearing a load requires delete access; adding/editing is open */
+    if (clear && !canDel) { flash('🔒 Deleting a load is restricted — unlock delete access in the header.'); setEditing(null); setConfirmClear(null); return; }
     setAssign((prev) => { const next = { ...prev }; if (clear) delete next[k]; else next[k] = a; return next; });
     setEditing(null);
     void setAssignment(tractor, date, clear ? null : a);
@@ -100,8 +105,9 @@ export default function AssetMatrixView() {
             </span>
           ))}
           <span className="am-legend-item"><span className="am-usps">USPS</span> = contract route</span>
+          <DeleteAccess canDel={canDel} setCanDel={setCanDel} />
         </div>
-        {notice && <div className="am-notice">⛔ {notice}</div>}
+        {notice && <div className="am-notice">{notice}</div>}
       </div>
 
       <div className="am-scroll">
@@ -133,6 +139,7 @@ export default function AssetMatrixView() {
                 setConfirmClear={setConfirmClear}
                 flash={flash}
                 fleet={fleet}
+                canDel={canDel}
               />
             ))}
           </tbody>
@@ -142,25 +149,28 @@ export default function AssetMatrixView() {
   );
 }
 
-function TerminalRows({ term, trucks, dates, assign, editing, setEditing, save, move, confirmClear, setConfirmClear, flash, fleet }: {
+function TerminalRows({ term, trucks, dates, assign, editing, setEditing, save, move, confirmClear, setConfirmClear, flash, fleet, canDel }: {
   term: string; trucks: FleetTruck[]; dates: string[];
   assign: Record<string, Assignment>; editing: string | null;
   setEditing: (k: string | null) => void; save: (k: string, a: Assignment) => void;
   move: (fromKey: string, toKey: string) => void;
   confirmClear: string | null; setConfirmClear: (k: string | null) => void;
-  flash: (msg: string) => void; fleet: FleetTruck[];
+  flash: (msg: string) => void; fleet: FleetTruck[]; canDel: boolean;
 }) {
   return (
     <>
       <tr className="am-term"><td colSpan={8}>{TERMINAL_LABELS[term] ?? term} · {trucks.length} trucks</td></tr>
       {trucks.map((t) => {
-        const down = t.status === 'shutdown';
+        const down = isShutdown(t.status);
+        const meta = teamStatusMeta(t.status);
+        const rowCls = down ? 'row-shutdown' : (t.status || '').trim().toLowerCase() === 'ntb' ? 'row-ntb' : (t.status || '').trim().toLowerCase() === 'deadhead' ? 'row-deadhead' : '';
         return (
-        <tr key={t.tractor} className={down ? 'row-shutdown' : ''}>
+        <tr key={t.tractor} className={rowCls}>
           <td className="am-truckcol">
-            <div className="am-tractor">#{t.tractor} <span className="am-rating">{t.rating}</span>{down && <span className="am-shutdown-tag">⛔ SHUTDOWN</span>}</div>
+            <div className="am-tractor">#{t.tractor} <span className="am-rating">{t.rating}</span></div>
             <div className="am-drivers">{[t.driver1, t.driver2].filter(Boolean).join(' · ')}</div>
             <div className="am-ttype">{t.type}</div>
+            {meta.onMatrix && <div className="am-teamstatus" style={{ color: meta.color, background: meta.tint }}>{meta.label}</div>}
             {t.constraints && <div className="am-teamnote">📝 {t.constraints}</div>}
           </td>
           {dates.map((d, di) => {
@@ -168,7 +178,7 @@ function TerminalRows({ term, trucks, dates, assign, editing, setEditing, save, 
             const a = assign[k];
             const done = a && (a.status === 'delivered' || a.status === 'completed');
             const nextA = di < dates.length - 1 ? assign[cellKey(t.tractor, dates[di + 1])] : undefined;
-            if (editing === k) return <td key={d} className="am-cell"><CellEditor init={a} conflicts={driverConflicts(t.tractor, d, assign, fleet)} onSave={(x) => save(k, x)} onCancel={() => setEditing(null)} /></td>;
+            if (editing === k) return <td key={d} className="am-cell"><CellEditor init={a} conflicts={driverConflicts(t.tractor, d, assign, fleet)} canDel={canDel} onSave={(x) => save(k, x)} onCancel={() => setEditing(null)} /></td>;
             return (
               <td
                 key={d}
@@ -183,13 +193,12 @@ function TerminalRows({ term, trucks, dates, assign, editing, setEditing, save, 
                     style={{ borderLeftColor: STATUS_COLOR[a.status] }}
                     draggable
                     onDragStart={(e) => { e.stopPropagation(); e.dataTransfer.setData('text/plain', k); }}
-                    onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); setConfirmClear(k); }}
-                    title="Drag to an empty day to move · right-click to clear"
+                    onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); if (!canDel) { flash('🔒 Deleting a load is restricted — unlock delete access in the header.'); return; } setConfirmClear(k); }}
+                    title={canDel ? 'Drag to an empty day to move · right-click to clear' : 'Drag to an empty day to move · deleting is restricted'}
                   >
                     <div className="am-route">
                       {a.route}
                       {a.usps && <span className="am-usps">USPS</span>}
-                      {a.usps && <span className="am-bravo" title="USPS contract — coincides with Bravo Matrix">⇄ Bravo</span>}
                     </div>
                     <div className="am-status" style={{ color: STATUS_COLOR[a.status] }}>{STATUS_LABEL[a.status] ?? a.status}</div>
                     {done && (nextA
@@ -214,7 +223,7 @@ function TerminalRows({ term, trucks, dates, assign, editing, setEditing, save, 
   );
 }
 
-function CellEditor({ init, conflicts, onSave, onCancel }: { init?: Assignment; conflicts: DriverConflict[]; onSave: (a: Assignment) => void; onCancel: () => void }) {
+function CellEditor({ init, conflicts, canDel, onSave, onCancel }: { init?: Assignment; conflicts: DriverConflict[]; canDel: boolean; onSave: (a: Assignment) => void; onCancel: () => void }) {
   const [route, setRoute] = useState(init?.route ?? '');
   const [status, setStatus] = useState<Status>((init?.status as Status) ?? 'covered');
   const [usps, setUsps] = useState(init?.usps ?? true);
@@ -240,9 +249,80 @@ function CellEditor({ init, conflicts, onSave, onCancel }: { init?: Assignment; 
       )}
       <div className="am-editor-btns">
         <button className={hasConflict ? 'am-save am-save-warn' : 'am-save'} onClick={() => onSave({ route, status, usps })}>{hasConflict ? 'Assign anyway' : 'Save'}</button>
-        <button className="am-clear" onClick={() => onSave({ route: '', status, usps })}>Clear</button>
+        {init && (canDel
+          ? <button className="am-clear" onClick={() => onSave({ route: '', status, usps })}>Clear</button>
+          : <button className="am-clear" disabled title="Deleting is restricted — unlock delete access in the header">🔒 Clear</button>)}
         <button className="am-cancel" onClick={onCancel}>✕</button>
       </div>
     </div>
+  );
+}
+
+/* Delete-access control — sits in the Matrix legend. Locked by default; unlock by
+   entering an authorized email (owner-managed). Adding/editing loads never needs
+   this — only deleting (clearing) a load does. */
+function DeleteAccess({ canDel, setCanDel }: { canDel: boolean; setCanDel: (v: boolean) => void }) {
+  const [open, setOpen] = useState(false);
+  const [email, setEmail] = useState('');
+  const [msg, setMsg] = useState('');
+  const [manage, setManage] = useState(false);
+  const [list, setList] = useState<string[]>(() => authorizedDeleters());
+  const [newEmail, setNewEmail] = useState('');
+
+  function doUnlock() {
+    const r = unlock(email);
+    setMsg(r.msg);
+    if (r.ok) { setCanDel(true); setEmail(''); }
+  }
+  function lock() { clearSession(); setCanDel(false); setMsg(''); setManage(false); setOpen(false); }
+
+  return (
+    <span className="am-delaccess">
+      <button className={`am-lockbtn ${canDel ? 'unlocked' : ''}`} onClick={() => setOpen((o) => !o)}
+        title={canDel ? `Delete access unlocked — ${sessionEmail()}` : 'Deleting loads is restricted — click to unlock'}>
+        {canDel ? `🔓 Delete: ${sessionEmail()}` : '🔒 Deletes locked'}
+      </button>
+      {open && (
+        <div className="am-lockpanel" onClick={(e) => e.stopPropagation()}>
+          {canDel ? (
+            <>
+              <div className="am-lockrow">✓ Unlocked as <b>{sessionEmail()}</b></div>
+              <div className="am-lockbtns">
+                <button className="am-clear" onClick={lock}>Lock again</button>
+                {isOwner() && <button className="am-clear" onClick={() => setManage((m) => !m)}>{manage ? 'Hide list' : 'Manage who can delete'}</button>}
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="am-lockrow">Deleting an active load is restricted. Enter your authorized email to unlock for this session.</div>
+              <div className="am-lockbtns">
+                <input className="am-input" placeholder="you@company.com" value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === 'Enter') doUnlock(); }} />
+                <button className="am-save" onClick={doUnlock}>Unlock</button>
+              </div>
+            </>
+          )}
+          {msg && <div className={`am-lockmsg ${canDel ? 'ok' : 'bad'}`}>{msg}</div>}
+          {manage && isOwner() && (
+            <div className="am-lockmanage">
+              <div className="am-lockrow">Authorized to delete:</div>
+              {list.map((e) => (
+                <div key={e} className="am-lockperson">
+                  <span>{e}</span>
+                  <button className="fleet-del" title="Remove" onClick={() => setList(removeAuthorized(e))}>🗑</button>
+                </div>
+              ))}
+              <div className="am-lockbtns">
+                <input className="am-input" placeholder="add email…" value={newEmail}
+                  onChange={(e) => setNewEmail(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === 'Enter' && newEmail.trim()) { setList(addAuthorized(newEmail)); setNewEmail(''); } }} />
+                <button className="am-save" disabled={!newEmail.trim()} onClick={() => { setList(addAuthorized(newEmail)); setNewEmail(''); }}>Add</button>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+    </span>
   );
 }
