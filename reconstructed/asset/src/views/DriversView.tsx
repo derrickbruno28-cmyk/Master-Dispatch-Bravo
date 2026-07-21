@@ -61,7 +61,8 @@ export default function DriversView() {
     const overdue = drivers
       .map((d) => ({ d, left: daysUntil(d.returnDate) }))
       .filter((x) => x.left !== null && x.left < 0);
-    return { noReady, noReturn, dueSoon, overdue };
+    const flagged = drivers.filter((d) => (d.flag || '').trim());
+    return { noReady, noReturn, dueSoon, overdue, flagged };
   }, [drivers]);
 
   const availCount = useMemo(() => [...avail.values()].filter((a) => a.available).length, [avail]);
@@ -114,8 +115,14 @@ export default function DriversView() {
       </div>
 
       {/* availability alerts */}
-      {(alerts.noReady.length > 0 || alerts.noReturn.length > 0 || alerts.dueSoon.length > 0 || alerts.overdue.length > 0) && (
+      {(alerts.noReady.length > 0 || alerts.noReturn.length > 0 || alerts.dueSoon.length > 0 || alerts.overdue.length > 0 || alerts.flagged.length > 0) && (
         <div className="drv-alerts">
+          {alerts.flagged.length > 0 && (
+            <div className="drv-alert drv-alert-bad">
+              🚩 <b>{alerts.flagged.length}</b> driver{alerts.flagged.length > 1 ? 's' : ''} to review:
+              <span className="drv-alert-names"> {alerts.flagged.map((d) => `${d.name} (${d.flag})`).join(', ')}</span>
+            </div>
+          )}
           {alerts.noReady.length > 0 && (
             <div className="drv-alert drv-alert-warn">
               ⚠ <b>{alerts.noReady.length}</b> driver{alerts.noReady.length > 1 ? 's' : ''} with <b>no ready-to-go date</b>:
@@ -185,7 +192,7 @@ export default function DriversView() {
               const a = avail.get(d.id)!;
               return (
                 <tr key={d.id}>
-                  <td className="am-tractor">{d.name}</td>
+                  <td className="am-tractor">{d.name}{(d.flag || '').trim() && <span className="drv-flag" title={d.flag}>🚩 {d.flag}</span>}</td>
                   <td><span className="am-pill" style={{ color: 'var(--accent)' }}>{d.position}</span></td>
                   <td>
                     {(teamStatusByName.get(d.name.trim().toLowerCase()) || '').toLowerCase() === 'ntb' ? (
@@ -242,7 +249,10 @@ function DriverEditor({ driver, isNew, onSave, onCancel }: { driver: Driver; isN
         <h3>{isNew ? 'Add Driver' : `Edit ${driver.name}`}</h3>
         <div className="fleet-form-grid">
           <L t="Name"><input className="am-input" value={d.name} onChange={(e) => f('name', e.target.value)} /></L>
-          <L t="Position"><input className="am-input" list="drv-positions" value={d.position} onChange={(e) => f('position', e.target.value)} /><datalist id="drv-positions">{DEFAULT_POSITIONS.map((p) => <option key={p} value={p} />)}</datalist></L>
+          <L t="Position"><select className="am-input" value={d.position} onChange={(e) => f('position', e.target.value)}>
+            {!DEFAULT_POSITIONS.includes(d.position) && d.position && <option value={d.position}>{d.position}</option>}
+            {DEFAULT_POSITIONS.map((p) => <option key={p} value={p}>{p}</option>)}
+          </select></L>
           <L t="Phone"><input className="am-input" value={d.phone} onChange={(e) => f('phone', e.target.value)} /></L>
           <L t="Address"><input className="am-input" value={d.address} onChange={(e) => f('address', e.target.value)} /></L>
         </div>
@@ -268,6 +278,9 @@ function DriverEditor({ driver, isNew, onSave, onCancel }: { driver: Driver; isN
 
         <L t="Constraints (e.g. no NYC · solo only · hazmat · home by Fri)">
           <textarea className="am-input" rows={2} value={d.constraints} onChange={(e) => f('constraints', e.target.value)} />
+        </L>
+        <L t="🚩 Review flag (needs 1-on-1 · unresponsive · off · no terminal … clear when resolved)">
+          <input className="am-input" value={d.flag} onChange={(e) => f('flag', e.target.value)} placeholder="empty = no issue" />
         </L>
         <div className="fleet-modal-btns">
           <button className="am-save" disabled={!d.name.trim()} onClick={() => onSave(d)}>{isNew ? 'Add driver' : 'Save changes'}</button>

@@ -11,15 +11,18 @@ export interface FleetTruck {
   hoursAvail: number; status: string; currentRoute: string;
   constraints: string;      // per-team dispatch constraints (free text)
   deadheadTo?: string;      // when status = Deadhead, the hub/city they're returning to
+  flyer?: '' | 'driver' | 'team';  // dispatch flyer sent → drivers turn yellow
+  confirm1?: boolean;       // driver 1 confirmed the load
+  confirm2?: boolean;       // driver 2 confirmed the load
 }
 
 export { TERMINALS, TERMINAL_LABELS };
 
-const KEY = 'asset-fleet-v1';
+const KEY = 'asset-fleet-v2';   // v2 = Houston terminal removed (#444 → SATX) + flyer/confirm fields
 
 function read(): FleetTruck[] {
-  try { const r = localStorage.getItem(KEY); if (r) return (JSON.parse(r) as FleetTruck[]).map((t) => ({ deadheadTo: '', ...t })); } catch { /* ignore */ }
-  return SEED.map((t) => ({ ...t, constraints: '', deadheadTo: '' }));
+  try { const r = localStorage.getItem(KEY); if (r) return (JSON.parse(r) as FleetTruck[]).map((t) => ({ deadheadTo: '', flyer: '' as const, confirm1: false, confirm2: false, ...t })); } catch { /* ignore */ }
+  return SEED.map((t) => ({ ...t, constraints: '', deadheadTo: '', flyer: '' as const, confirm1: false, confirm2: false }));
 }
 function write(list: FleetTruck[]) {
   try { localStorage.setItem(KEY, JSON.stringify(list)); } catch { /* ignore */ }
@@ -46,7 +49,7 @@ export function blankTruck(): FleetTruck {
   return {
     tractor: '', rating: 'A', driver1: '', driver2: '', type: 'OTR Team',
     currentCity: 'DALLAS', homeCity: 'DALLAS', returnDate: '', hoursAvail: 70,
-    status: 'NTB', currentRoute: '', constraints: '', deadheadTo: '',
+    status: 'NTB', currentRoute: '', constraints: '', deadheadTo: '', flyer: '', confirm1: false, confirm2: false,
   };
 }
 

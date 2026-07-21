@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { TERMINALS, TERMINAL_LABELS, ROUTES } from '../data/fleet';
-import { loadFleet, teamStatusMeta, isShutdown, type FleetTruck } from '../data/fleetStore';
+import { loadFleet, saveTruck, teamStatusMeta, isShutdown, type FleetTruck } from '../data/fleetStore';
+import { loadDrivers } from '../data/driversStore';
 import { onChange } from '../data/bus';
 import {
   loadAssignments, setAssignment, moveAssignment, ensureSeed, cellKey, parseCellKey,
@@ -39,6 +40,7 @@ export default function AssetMatrixView() {
   const [assign, setAssign] = useState<Record<string, Assignment>>(() => { ensureSeed(); return loadAssignments(); });
   const [editing, setEditing] = useState<string | null>(null);
   const [termFilter, setTermFilter] = useState<string>('ALL');
+  const [posFilter, setPosFilter] = useState<string>('ALL');
   const [confirmClear, setConfirmClear] = useState<string | null>(null);
   const [notice, setNotice] = useState<string>('');
   const [canDel, setCanDel] = useState<boolean>(() => canDelete());
@@ -60,12 +62,33 @@ export default function AssetMatrixView() {
     [dates, assign, termFilter],
   );
   const weekTotal = dayCounts.reduce((a, b) => a + b, 0);
+
+  /* driver name → position (from the Master Drivers List), so we can filter the
+     matrix by position / hero teams without cluttering the board */
+  const driverPos = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const d of loadDrivers()) m.set(d.name.trim().toLowerCase(), d.position);
+    return m;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fleet]);
+  const positions = useMemo(() => [...new Set([...driverPos.values()].filter(Boolean))].sort(), [driverPos]);
+  function truckPositions(t: FleetTruck): string[] {
+    return [t.driver1, t.driver2].map((n) => driverPos.get((n || '').trim().toLowerCase()) || '').filter(Boolean);
+  }
+  function matchesPos(t: FleetTruck): boolean {
+    if (posFilter === 'ALL') return true;
+    const ps = truckPositions(t);
+    if (posFilter === '__HERO') return ps.some((p) => /hero/i.test(p));
+    return ps.includes(posFilter);
+  }
+
   const byTerminal = useMemo(() => {
     const m: Record<string, FleetTruck[]> = {};
     for (const term of TERMINALS) m[term] = [];
-    for (const t of fleet) (m[t.homeCity] ?? (m[t.homeCity] = [])).push(t);
+    for (const t of fleet) { if (!matchesPos(t)) continue; (m[t.homeCity] ?? (m[t.homeCity] = [])).push(t); }
     return m;
-  }, [fleet]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fleet, posFilter, driverPos]);
 
   const weekLabel = `${weekStart.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} – ${addDays(weekStart, 6).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}`;
 
@@ -100,11 +123,15 @@ export default function AssetMatrixView() {
           <button className="am-today" onClick={() => setWeekStart(mondayOf(new Date()))}>Today</button>
         </div>
         <div className="am-termfilter">
-          {(['ALL', ...TERMINALS] as string[]).map((t) => (
-            <button key={t} className={`am-tchip ${termFilter === t ? 'on' : ''}`} onClick={() => setTermFilter(t)}>
-              {t === 'ALL' ? 'All terminals' : (TERMINAL_LABELS[t] ?? t)}
-            </button>
-          ))}
+          <select className="am-input am-filter" value={termFilter} onChange={(e) => setTermFilter(e.target.value)}>
+            <option value="ALL">All terminals</option>
+            {TERMINALS.map((t) => <option key={t} value={t}>{TERMINAL_LABELS[t] ?? t}</option>)}
+          </select>
+          <select className="am-input am-filter" value={posFilter} onChange={(e) => setPosFilter(e.target.value)}>
+            <option value="ALL">All positions</option>
+            <option value="__HERO">★ Hero teams</option>
+            {positions.map((p) => <option key={p} value={p}>{p}</option>)}
+          </select>
           <span className="am-muted">{weekTotal} assigned this week</span>
         </div>
         <div className="am-legend">
@@ -166,20 +193,36 @@ function TerminalRows({ term, trucks, dates, assign, editing, setEditing, save, 
   confirmClear: string | null; setConfirmClear: (k: string | null) => void;
   flash: (msg: string) => void; fleet: FleetTruck[]; canDel: boolean;
 }) {
-  return (
-    <>
-      <tr className="am-term"><td colSpan={8}>{TERMINAL_LABELS[term] ?? term} · {trucks.length} trucks</td></tr>
-      {trucks.map((t) => {
+  const teams = trucks.filter((t) => (t.driver2 || '').trim());
+  const solos = trucks.filter((t) => !(t.driver2 || '').trim());
+
+  function renderTruck(t: FleetTruck) {
         const down = isShutdown(t.status);
         const meta = teamStatusMeta(t.status);
         const sLower = (t.status || '').trim().toLowerCase();
         const statusLabel = sLower === 'deadhead' && (t.deadheadTo || '').trim() ? `Deadhead → ${t.deadheadTo}` : meta.label;
         const rowCls = down ? 'row-shutdown' : sLower === 'ntb' ? 'row-ntb' : sLower === 'deadhead' ? 'row-deadhead' : '';
+        const hasFlyer = !!t.flyer;
+        const nameCls = (confirmed: boolean) => confirmed ? 'am-driver-ok' : hasFlyer ? 'am-driver-flyer' : '';
+        const drivers = [t.driver1, t.driver2].filter(Boolean);
+        const confirmedN = (t.driver1 && t.confirm1 ? 1 : 0) + (t.driver2 && t.confirm2 ? 1 : 0);
+        const pct = drivers.length ? Math.round((confirmedN / drivers.length) * 100) : 0;
         return (
         <tr key={t.tractor} className={rowCls}>
           <td className="am-truckcol">
             <div className="am-tractor">#{t.tractor} <span className="am-rating">{t.rating}</span></div>
-            <div className="am-drivers">{[t.driver1, t.driver2].filter(Boolean).join(' · ')}</div>
+            <div className="am-drivers-confirm">
+              {t.driver1 && <label className={`am-driverchk ${nameCls(!!t.confirm1)}`}><input type="checkbox" checked={!!t.confirm1} onChange={(e) => saveTruck({ ...t, confirm1: e.target.checked })} />{t.driver1}</label>}
+              {t.driver2 && <label className={`am-driverchk ${nameCls(!!t.confirm2)}`}><input type="checkbox" checked={!!t.confirm2} onChange={(e) => saveTruck({ ...t, confirm2: e.target.checked })} />{t.driver2}</label>}
+            </div>
+            <div className="am-flyerrow">
+              <select className="am-flyersel" value={t.flyer || ''} onChange={(e) => saveTruck({ ...t, flyer: e.target.value as FleetTruck['flyer'] })} title="Dispatch flyer status — drivers turn yellow when sent, green when confirmed">
+                <option value="">— no flyer —</option>
+                <option value="driver">Flyer sent → driver</option>
+                <option value="team">Flyer sent → team</option>
+              </select>
+              {hasFlyer && <span className={`am-confirmpct ${pct === 100 ? 'full' : ''}`}>{pct}% confirmed</span>}
+            </div>
             <div className="am-ttype">{t.type}</div>
             {meta.onMatrix && <div className="am-teamstatus" style={{ color: meta.color, background: meta.tint }}>{statusLabel}</div>}
             {t.constraints && <div className="am-teamnote">📝 {t.constraints}</div>}
@@ -229,7 +272,15 @@ function TerminalRows({ term, trucks, dates, assign, editing, setEditing, save, 
           })}
         </tr>
         );
-      })}
+  }
+
+  return (
+    <>
+      <tr className="am-term"><td colSpan={8}>{TERMINAL_LABELS[term] ?? term} · {trucks.length} truck{trucks.length === 1 ? '' : 's'}</td></tr>
+      {teams.length > 0 && <tr className="am-subterm"><td colSpan={8}>▸ Teams · {teams.length}</td></tr>}
+      {teams.map(renderTruck)}
+      {solos.length > 0 && <tr className="am-subterm"><td colSpan={8}>▸ Solo · {solos.length}</td></tr>}
+      {solos.map(renderTruck)}
     </>
   );
 }

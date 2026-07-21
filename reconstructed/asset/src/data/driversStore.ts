@@ -6,6 +6,7 @@
 import { loadFleet } from './fleetStore';
 import { loadAssignments, parseCellKey } from './schedule';
 import { emitChange } from './bus';
+import { DRIVER_SEED } from './driversSeed';
 
 export interface Driver {
   id: string;
@@ -17,6 +18,7 @@ export interface Driver {
   readyDate: string;   // YYYY-MM-DD — available to dispatch on/after
   returnDate: string;  // YYYY-MM-DD — needs to be home by
   pattern: string;     // one of AVAIL_PATTERNS
+  flag: string;        // review flag (1-on-1 call, off/unresponsive, no terminal…); '' = ok
 }
 
 export const DEFAULT_POSITIONS = [
@@ -27,14 +29,19 @@ export const DEFAULT_POSITIONS = [
 
 export const AVAIL_PATTERNS = ['Mon–Sat', 'Tue–Sun', 'Sun–Fri', 'Wed–Mon', '5 Days', 'Running Wild'];
 
-const KEY = 'asset-drivers-v1';
+const KEY = 'asset-drivers-v2';   // v2 = seeded from the real MASTER DISPATCH roster
 
 function read(): Driver[] {
   try { const r = localStorage.getItem(KEY); if (r) return (JSON.parse(r) as Driver[]).map(norm); } catch { /* ignore */ }
-  return seedFromFleet();
+  return seedFromSheet();
 }
 function norm(d: Partial<Driver>): Driver {
-  return { id: d.id ?? `drv-${Math.random().toString(36).slice(2)}`, name: d.name ?? '', position: d.position ?? 'OTR Team', address: d.address ?? '', phone: d.phone ?? '', constraints: d.constraints ?? '', readyDate: d.readyDate ?? '', returnDate: d.returnDate ?? '', pattern: d.pattern ?? '' };
+  return { id: d.id ?? `drv-${Math.random().toString(36).slice(2)}`, name: d.name ?? '', position: d.position ?? 'OTR Team', address: d.address ?? '', phone: d.phone ?? '', constraints: d.constraints ?? '', readyDate: d.readyDate ?? '', returnDate: d.returnDate ?? '', pattern: d.pattern ?? '', flag: d.flag ?? '' };
+}
+
+/* seed the full roster parsed from the MASTER DISPATCH sheet (K & L columns) */
+function seedFromSheet(): Driver[] {
+  return DRIVER_SEED.map((d, i) => norm({ id: `drv-${i}`, ...d })).sort((a, b) => a.name.localeCompare(b.name));
 }
 function write(list: Driver[]) { try { localStorage.setItem(KEY, JSON.stringify(list)); } catch { /* ignore */ } emitChange(); }
 
@@ -44,19 +51,6 @@ export function teamStatusOf(name: string): string {
   const n = name.trim().toLowerCase(); if (!n) return '';
   const t = loadFleet().find((x) => x.driver1.toLowerCase() === n || x.driver2.toLowerCase() === n);
   return t?.status ?? '';
-}
-
-function seedFromFleet(): Driver[] {
-  const seen = new Set<string>(); const out: Driver[] = [];
-  for (const t of loadFleet()) {
-    for (const nm of [t.driver1, t.driver2]) {
-      const name = (nm || '').trim();
-      if (!name || seen.has(name.toLowerCase())) continue;
-      seen.add(name.toLowerCase());
-      out.push(norm({ id: `drv-${out.length}`, name, position: t.type || 'OTR Team' }));
-    }
-  }
-  return out.sort((a, b) => a.name.localeCompare(b.name));
 }
 
 export function loadDrivers(): Driver[] { return read(); }

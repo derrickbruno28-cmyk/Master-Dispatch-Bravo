@@ -23,7 +23,7 @@ export const TRUCKS: Truck[] = [
 {tractor:"765",rating:"A (G)(I)",driver1:"Derek Brewer",driver2:"Derrick Frazier",type:"OTR Team",currentCity:"MEMPHIS",homeCity:"DALLAS",returnDate:"03/25",hoursAvail:58,status:"en route",currentRoute:"16191 TN-VA"},
 {tractor:"957",rating:"A",driver1:"Daniel Williams",driver2:"Ricky Rodriguez",type:"OTR Team",currentCity:"COPPELL",homeCity:"SATX",returnDate:"End of March",hoursAvail:52,status:"en route",currentRoute:"16207 COP-CO"},
 {tractor:"759",rating:"A",driver1:"Jermaine Thomas",driver2:"Martez Jackson",type:"OTR Team",currentCity:"IRVING",homeCity:"DALLAS",returnDate:"",hoursAvail:50,status:"en route",currentRoute:"16189 IRV-CO"},
-{tractor:"444",rating:"A (G)(I)",driver1:"Bruce Woodrum",driver2:"Anthony Garcia",type:"OTR Team",currentCity:"HOUSTON",homeCity:"HOUSTON",returnDate:"",hoursAvail:0,status:"on 34hr reset",currentRoute:"⏰ ON 34 - Houston"},
+{tractor:"444",rating:"A (G)(I)",driver1:"Bruce Woodrum",driver2:"Anthony Garcia",type:"OTR Team",currentCity:"HOUSTON",homeCity:"SATX",returnDate:"",hoursAvail:0,status:"on 34hr reset",currentRoute:"⏰ ON 34 - Houston"},
 {tractor:"766",rating:"A (G)(I)",driver1:"Kyonna Harrison",driver2:"Derrick Mitchell",type:"OTR Team",currentCity:"DENVER",homeCity:"DALLAS",returnDate:"End of Feb",hoursAvail:0,status:"on 34hr reset",currentRoute:"⏰ ON 34 - Colorado"},
 {tractor:"443",rating:"A (G)(I)",driver1:"Davonte Galbert",driver2:"Erick Hall",type:"OTR Team",currentCity:"MEMPHIS",homeCity:"DALLAS",returnDate:"",hoursAvail:46,status:"en route",currentRoute:"16190 Mem-SC"},
 {tractor:"748",rating:"A I",driver1:"Luis Trinidad",driver2:"Silvestre Contreras",type:"OTR Team",currentCity:"RALEIGH",homeCity:"SATX",returnDate:"04/02",hoursAvail:55,status:"en route",currentRoute:"16192 NC-FL"},
@@ -119,6 +119,6 @@ export const ROUTES: AssetRoute[] = [
 ];
 
 /* The three primary terminals the Asset Matrix schedules by (Houston kept as a 4th group). */
-export const TERMINALS = ['SATX','DALLAS','MEMPHIS','HOUSTON'] as const;
+export const TERMINALS = ['SATX','DALLAS','MEMPHIS'] as const;
 export const TERMINAL_LABELS: Record<string,string> = {
   SATX:'San Antonio, TX', DALLAS:'Dallas, TX', MEMPHIS:'Memphis, TN', HOUSTON:'Houston, TX' };
