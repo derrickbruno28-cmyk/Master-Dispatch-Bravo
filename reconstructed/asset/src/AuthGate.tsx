@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { onAuthStateChanged, getRedirectResult, type User } from 'firebase/auth';
-import { auth, firebaseEnabled, signInWithGoogle, signOut, isCompanyEmail, ALLOWED_DOMAINS } from './firebase';
+import { auth, firebaseEnabled, signInWithGoogle, signOut, isCompanyEmail } from './firebase';
+import { setSessionEmail, clearSession, currentRole, ROLE_LABELS } from './data/permStore';
 
 /* AuthGate — mirrors the GH Driver Hub sign-in. When Firebase is configured
    (production), the Asset Matrix is only reachable after a Google sign-in with a
@@ -21,8 +22,9 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
     getRedirectResult(auth).catch((e) => setErr((e as Error).message || 'Sign-in failed.'));
     return onAuthStateChanged(auth, (u) => {
       // enforce the work-email allowlist even on restored sessions
-      if (u && u.email && !isCompanyEmail(u.email)) { void signOut(); setUser(null); }
-      else setUser(u);
+      if (u && u.email && !isCompanyEmail(u.email)) { void signOut(); clearSession(); setUser(null); setErr('That account isn’t authorized. Sign in with your approved work account.'); }
+      else if (u && u.email) { setSessionEmail(u.email); setUser(u); }
+      else { clearSession(); setUser(u); }
       setReady(true);
     });
   }, []);
@@ -42,11 +44,12 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
   }
 
   if (user) {
+    const role = currentRole();
     return (
       <>
         <div className="auth-bar">
-          <span className="auth-who">🔒 {user.email}</span>
-          <button className="auth-signout" onClick={() => signOut()}>Sign out</button>
+          <span className="auth-who">🔒 {user.email}{role && <span className="auth-role"> · {ROLE_LABELS[role]}</span>}</span>
+          <button className="auth-signout" onClick={() => { clearSession(); signOut(); }}>Sign out</button>
         </div>
         {children}
       </>
@@ -64,7 +67,6 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
           <span className="auth-g">G</span>{busy ? 'Signing in…' : 'Sign in with Google'}
         </button>
         {err && <div className="auth-err">{err}</div>}
-        <div className="auth-domains">Access limited to {ALLOWED_DOMAINS.map((d) => `@${d}`).join(' · ')}</div>
       </div>
     </div>
   );

@@ -7,7 +7,12 @@ import {
   loadAssignments, setAssignment, moveAssignment, ensureSeed, cellKey, parseCellKey,
   isoDate, mondayOf, addDays, driverConflicts, type Assignment, type DriverConflict,
 } from '../data/schedule';
-import { canDelete, sessionEmail, isOwner, unlock, clearSession, authorizedDeleters, addAuthorized, removeAuthorized } from '../data/permStore';
+import {
+  canDelete, canManageRoles, currentRole, currentEmail,
+  roleAssignments, setRole, removeRole, ASSIGNABLE_ROLES, ROLE_LABELS, ROLE_DESC,
+  demoRole, setDemoRole, type Role,
+} from '../data/permStore';
+import { firebaseEnabled } from '../firebase';
 
 /* Asset Matrix — the scheduling board for our OWN trucks.
    Rows = trucks grouped by home terminal (SA / Dallas / Memphis / Houston),
@@ -16,13 +21,14 @@ import { canDelete, sessionEmail, isOwner, unlock, clearSession, authorizedDelet
    editable assignment. Adding/editing loads is open; DELETING a load is gated
    behind delete access. All reads/writes go through data/schedule. */
 
-/* Load lifecycle on a matrix cell: covered → dispatched → at shipper → at yard →
-   en route → at receiver → delivered → completed (off = home/reset). */
-const STATUSES = ['open', 'covered', 'dispatched', 'at shipper', 'at yard', 'en route', 'at receiver', 'delivered', 'completed', 'off'] as const;
+/* Load lifecycle on a matrix cell, in real dispatch order: covered → dispatched →
+   at yard → at shipper → en route → at receiver → delivered → completed
+   (off = home/reset). */
+const STATUSES = ['open', 'covered', 'dispatched', 'at yard', 'at shipper', 'en route', 'at receiver', 'delivered', 'completed', 'off'] as const;
 type Status = typeof STATUSES[number];
 const STATUS_COLOR: Record<string, string> = {
   open: 'var(--muted)', covered: 'var(--green)', dispatched: '#00b8d4',
-  'at shipper': '#e8a33d', 'at yard': '#b0842a', 'en route': 'var(--accent)',
+  'at yard': '#b0842a', 'at shipper': '#e8a33d', 'en route': 'var(--accent)',
   'at receiver': '#7c5cff', delivered: '#6b7f9e', completed: '#a78bfa', off: 'var(--panel-2)',
 };
 const STATUS_LABEL: Record<string, string> = {
@@ -48,7 +54,7 @@ export default function AssetMatrixView() {
 
   /* live sync: reload fleet + assignments whenever any store changes (e.g. a team
      is set NTB on the Fleet card) so the matrix stays congruent without a reload */
-  useEffect(() => onChange(() => { setFleet(loadFleet()); setAssign(loadAssignments()); }), []);
+  useEffect(() => onChange(() => { setFleet(loadFleet()); setAssign(loadAssignments()); setCanDel(canDelete()); }), []);
 
   /* transient inline notice — replaces window.alert (blocked in sandboxes) */
   function flash(msg: string) { setNotice(msg); window.setTimeout(() => setNotice(''), 3200); }
@@ -320,68 +326,74 @@ function CellEditor({ init, conflicts, canDel, onSave, onCancel }: { init?: Assi
   );
 }
 
-/* Delete-access control — sits in the Matrix legend. Locked by default; unlock by
-   entering an authorized email (owner-managed). Adding/editing loads never needs
-   this — only deleting (clearing) a load does. */
+/* Access control — sits in the Matrix legend. Shows the current user's role and,
+   for the owner, a panel to assign roles (FMT Lead / US Ops / FMT) to work emails.
+   Editing loads is open to every role; DELETING a load/driver/team is the only
+   thing plain FMT can't do. In demo (no sign-in) a role switcher previews each
+   role. */
 function DeleteAccess({ canDel, setCanDel }: { canDel: boolean; setCanDel: (v: boolean) => void }) {
   const [open, setOpen] = useState(false);
-  const [email, setEmail] = useState('');
-  const [msg, setMsg] = useState('');
   const [manage, setManage] = useState(false);
-  const [list, setList] = useState<string[]>(() => authorizedDeleters());
+  const [list, setList] = useState(() => roleAssignments());
   const [newEmail, setNewEmail] = useState('');
+  const [newRole, setNewRole] = useState<Role>('fmt');
+  const role = currentRole();
 
-  function doUnlock() {
-    const r = unlock(email);
-    setMsg(r.msg);
-    if (r.ok) { setCanDel(true); setEmail(''); }
-  }
-  function lock() { clearSession(); setCanDel(false); setMsg(''); setManage(false); setOpen(false); }
+  function refresh() { setList(roleAssignments()); setCanDel(canDelete()); }
+  function assign(email: string, r: Role) { setRole(email, r); refresh(); }
+  function addNew() { const e = newEmail.trim(); if (!e) return; setRole(e, newRole); setNewEmail(''); refresh(); }
+  function drop(email: string) { removeRole(email); refresh(); }
 
   return (
     <span className="am-delaccess">
       <button className={`am-lockbtn ${canDel ? 'unlocked' : ''}`} onClick={() => setOpen((o) => !o)}
-        title={canDel ? `Delete access unlocked — ${sessionEmail()}` : 'Deleting loads is restricted — click to unlock'}>
-        {canDel ? `🔓 Delete: ${sessionEmail()}` : '🔒 Deletes locked'}
+        title={canDel ? 'You can delete loads, drivers, and teams' : 'FMT can edit but not delete — click for details'}>
+        {role ? `🔑 ${ROLE_LABELS[role]}${canDel ? '' : ' · edit-only'}` : '🔒 Not signed in'}
       </button>
       {open && (
         <div className="am-lockpanel" onClick={(e) => e.stopPropagation()}>
-          {canDel ? (
-            <>
-              <div className="am-lockrow">✓ Unlocked as <b>{sessionEmail()}</b></div>
-              <div className="am-lockbtns">
-                <button className="am-clear" onClick={lock}>Lock again</button>
-                {isOwner() && <button className="am-clear" onClick={() => setManage((m) => !m)}>{manage ? 'Hide list' : 'Manage who can delete'}</button>}
-              </div>
-            </>
-          ) : (
-            <>
-              <div className="am-lockrow">Deleting an active load is restricted. Enter your authorized email to unlock for this session.</div>
-              <div className="am-lockbtns">
-                <input className="am-input" placeholder="you@company.com" value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  onKeyDown={(e) => { if (e.key === 'Enter') doUnlock(); }} />
-                <button className="am-save" onClick={doUnlock}>Unlock</button>
-              </div>
-            </>
-          )}
-          {msg && <div className={`am-lockmsg ${canDel ? 'ok' : 'bad'}`}>{msg}</div>}
-          {manage && isOwner() && (
+          <div className="am-lockrow">Signed in as <b>{currentEmail() || '—'}</b>{role && <> · role <b>{ROLE_LABELS[role]}</b></>}</div>
+          <div className="am-lockrow am-muted" style={{ fontSize: 11 }}>{role ? ROLE_DESC[role] : 'Sign in with your work account to load your role.'}</div>
+
+          {!firebaseEnabled && (
             <div className="am-lockmanage">
-              <div className="am-lockrow">Authorized to delete:</div>
-              {list.map((e) => (
-                <div key={e} className="am-lockperson">
-                  <span>{e}</span>
-                  <button className="fleet-del" title="Remove" onClick={() => setList(removeAuthorized(e))}>🗑</button>
-                </div>
-              ))}
-              <div className="am-lockbtns">
-                <input className="am-input" placeholder="add email…" value={newEmail}
-                  onChange={(e) => setNewEmail(e.target.value)}
-                  onKeyDown={(e) => { if (e.key === 'Enter' && newEmail.trim()) { setList(addAuthorized(newEmail)); setNewEmail(''); } }} />
-                <button className="am-save" disabled={!newEmail.trim()} onClick={() => { setList(addAuthorized(newEmail)); setNewEmail(''); }}>Add</button>
+              <div className="am-lockrow">Preview as role (demo only):</div>
+              <div className="am-lockbtns" style={{ flexWrap: 'wrap' }}>
+                {(['owner', ...ASSIGNABLE_ROLES] as Role[]).map((r) => (
+                  <button key={r} className={`am-tchip ${demoRole() === r ? 'on' : ''}`} onClick={() => { setDemoRole(r); refresh(); }}>{ROLE_LABELS[r]}</button>
+                ))}
               </div>
             </div>
+          )}
+
+          {canManageRoles() && (
+            <>
+              <div className="am-lockbtns"><button className="am-clear" onClick={() => setManage((m) => !m)}>{manage ? 'Hide role list' : '👥 Manage user roles'}</button></div>
+              {manage && (
+                <div className="am-lockmanage">
+                  <div className="am-lockrow">Assigned roles (you are always Owner):</div>
+                  {list.length === 0 && <div className="am-lockrow am-muted" style={{ fontSize: 11 }}>No one assigned yet — add a teammate's work email below.</div>}
+                  {list.map((u) => (
+                    <div key={u.email} className="am-lockperson">
+                      <span>{u.email}</span>
+                      <select className="am-input" style={{ maxWidth: 120 }} value={u.role} onChange={(e) => assign(u.email, e.target.value as Role)}>
+                        {ASSIGNABLE_ROLES.map((r) => <option key={r} value={r}>{ROLE_LABELS[r]}</option>)}
+                      </select>
+                      <button className="fleet-del" title="Remove" onClick={() => drop(u.email)}>🗑</button>
+                    </div>
+                  ))}
+                  <div className="am-lockbtns">
+                    <input className="am-input" placeholder="teammate@ghlogisticsllc.com" value={newEmail}
+                      onChange={(e) => setNewEmail(e.target.value)}
+                      onKeyDown={(e) => { if (e.key === 'Enter') addNew(); }} />
+                    <select className="am-input" style={{ maxWidth: 120 }} value={newRole} onChange={(e) => setNewRole(e.target.value as Role)}>
+                      {ASSIGNABLE_ROLES.map((r) => <option key={r} value={r}>{ROLE_LABELS[r]}</option>)}
+                    </select>
+                    <button className="am-save" disabled={!newEmail.trim()} onClick={addNew}>Add</button>
+                  </div>
+                </div>
+              )}
+            </>
           )}
         </div>
       )}

@@ -343,3 +343,8 @@
 .auth-who { color: var(--muted); }
 .auth-signout { border: 1px solid var(--border); background: transparent; color: var(--text); border-radius: 6px; padding: 3px 10px; font: inherit; font-size: 11px; cursor: pointer; }
 .auth-signout:hover { border-color: var(--accent); color: var(--accent); }
+
+/* ---- role / access + cross-city pickup (permissions batch) ---- */
+.auth-role { color: var(--accent); font-weight: 600; }
+.fleet-pickup { margin-top: 3px; font-size: 10.5px; font-weight: 600; color: #d97706; background: rgba(217,119,6,0.10); border-radius: 5px; padding: 1px 6px; display: inline-block; }
+.fleet-pickup-hint { margin-top: 8px; font-size: 12px; color: #b45309; background: rgba(217,119,6,0.12); border: 1px solid rgba(217,119,6,0.35); border-radius: 8px; padding: 7px 10px; }

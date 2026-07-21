@@ -6,6 +6,7 @@ import {
 } from '../data/driversStore';
 import { loadFleet } from '../data/fleetStore';
 import { onChange } from '../data/bus';
+import { canDelete } from '../data/permStore';
 
 /* Master Drivers List — the driver-availability hub. Every driver carries a
    ready-to-go date, a return-home date, and a weekly availability pattern.
@@ -28,10 +29,12 @@ export default function DriversView() {
   const [csv, setCsv] = useState('');
   const [importMsg, setImportMsg] = useState('');
   const [confirmDel, setConfirmDel] = useState<string | null>(null);
+  const [canDel, setCanDel] = useState<boolean>(() => canDelete());
   const fileRef = useRef<HTMLInputElement>(null);
 
-  /* live sync — a team going NTB on the Fleet card / Matrix reflects here too */
-  useEffect(() => onChange(() => setDrivers(loadDrivers())), []);
+  /* live sync — a team going NTB on the Fleet card / Matrix reflects here too;
+     also refresh delete access in case the role changed (demo switch / sign-in) */
+  useEffect(() => onChange(() => { setDrivers(loadDrivers()); setCanDel(canDelete()); }), []);
 
   /* live availability for every driver, recomputed whenever the roster changes */
   const avail = useMemo(() => new Map(drivers.map((d) => [d.id, availabilityOf(d)])), [drivers]);
@@ -152,8 +155,8 @@ export default function DriversView() {
 
       {importOpen && (
         <div className="otp-form">
-          <div className="otp-field-label" style={{ marginBottom: 6 }}>Import drivers (CSV) — columns: <b>name, position, address, phone, constraints, ready, return, pattern</b> (a header row is auto-detected)</div>
-          <textarea className="am-input" rows={5} placeholder={'name,position,address,phone,constraints,ready,return,pattern\nJohn Smith,SATX Hero,"123 Main St, San Antonio TX",210-555-0100,no NYC,2026-07-21,2026-07-27,Mon–Sat'} value={csv} onChange={(e) => setCsv(e.target.value)} />
+          <div className="otp-field-label" style={{ marginBottom: 6 }}>Import drivers (CSV) — columns: <b>name, position, homecity, address, phone, constraints, ready, return, pattern</b> (a header row is auto-detected)</div>
+          <textarea className="am-input" rows={5} placeholder={'name,position,homecity,address,phone,constraints,ready,return,pattern\nJohn Smith,SATX Hero,San Antonio TX,"123 Main St, San Antonio TX",210-555-0100,no NYC,2026-07-21,2026-07-27,Mon–Sat'} value={csv} onChange={(e) => setCsv(e.target.value)} />
           <div className="otp-form-btns">
             <button className="am-save" onClick={() => runImport(csv)} disabled={!csv.trim()}>Import pasted CSV</button>
             <label className="am-clear" style={{ cursor: 'pointer' }}>⭳ Upload .csv<input ref={fileRef} type="file" accept=".csv,.txt" style={{ display: 'none' }} onChange={onFile} /></label>
@@ -223,7 +226,9 @@ export default function DriversView() {
                     ) : (
                       <>
                         <button className="am-clear" onClick={() => { setEditing({ ...d }); setIsNew(false); }}>✎ Edit</button>
-                        <button className="fleet-del" onClick={() => setConfirmDel(d.id)}>🗑</button>
+                        {canDel
+                          ? <button className="fleet-del" onClick={() => setConfirmDel(d.id)}>🗑</button>
+                          : <button className="fleet-del" disabled title="Deleting a driver is restricted to FMT Lead / US Ops / Owner">🔒</button>}
                       </>
                     )}
                   </td>
@@ -253,6 +258,7 @@ function DriverEditor({ driver, isNew, onSave, onCancel }: { driver: Driver; isN
             {!DEFAULT_POSITIONS.includes(d.position) && d.position && <option value={d.position}>{d.position}</option>}
             {DEFAULT_POSITIONS.map((p) => <option key={p} value={p}>{p}</option>)}
           </select></L>
+          <L t="Home city (where they're picked up — e.g. Dallas TX)"><input className="am-input" value={d.homeCity} onChange={(e) => f('homeCity', e.target.value)} placeholder="e.g. San Antonio TX" /></L>
           <L t="Phone"><input className="am-input" value={d.phone} onChange={(e) => f('phone', e.target.value)} /></L>
           <L t="Address"><input className="am-input" value={d.address} onChange={(e) => f('address', e.target.value)} /></L>
         </div>

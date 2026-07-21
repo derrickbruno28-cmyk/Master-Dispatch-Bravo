@@ -12,6 +12,7 @@ export interface Driver {
   id: string;
   name: string;
   position: string;
+  homeCity: string;    // city the driver lives in / is picked up from (e.g. "Dallas TX")
   address: string;
   phone: string;
   constraints: string;
@@ -36,8 +37,27 @@ function read(): Driver[] {
   return seedFromSheet();
 }
 function norm(d: Partial<Driver>): Driver {
-  return { id: d.id ?? `drv-${Math.random().toString(36).slice(2)}`, name: d.name ?? '', position: d.position ?? 'OTR Team', address: d.address ?? '', phone: d.phone ?? '', constraints: d.constraints ?? '', readyDate: d.readyDate ?? '', returnDate: d.returnDate ?? '', pattern: d.pattern ?? '', flag: d.flag ?? '' };
+  return { id: d.id ?? `drv-${Math.random().toString(36).slice(2)}`, name: d.name ?? '', position: d.position ?? 'OTR Team', homeCity: d.homeCity ?? cityFromAddress(d.address ?? ''), address: d.address ?? '', phone: d.phone ?? '', constraints: d.constraints ?? '', readyDate: d.readyDate ?? '', returnDate: d.returnDate ?? '', pattern: d.pattern ?? '', flag: d.flag ?? '' };
 }
+
+/* best-effort "City ST" from a free-text address, used only to pre-fill homeCity
+   when it wasn't set explicitly (e.g. "123 Main St, Dallas TX 75201" → "Dallas TX") */
+export function cityFromAddress(addr: string): string {
+  const a = (addr || '').trim(); if (!a) return '';
+  const parts = a.split(',').map((s) => s.trim()).filter(Boolean);
+  const tail = parts.length > 1 ? parts[parts.length - 1] : a;
+  const m = tail.match(/([A-Za-z][A-Za-z.\s]+?)\s+([A-Z]{2})\b/);   // "Dallas TX"
+  if (m) return `${m[1].trim()} ${m[2]}`;
+  return parts.length > 1 ? parts[parts.length - 2] : '';
+}
+
+/* the city a driver is picked up from (explicit homeCity wins, else parsed) */
+export function driverHomeCity(name: string): string {
+  const d = driverByName(name); if (!d) return '';
+  return (d.homeCity || '').trim() || cityFromAddress(d.address);
+}
+/* normalized compare key so "Dallas TX" and "dallas,  tx" match */
+export function cityKey(city: string): string { return (city || '').toLowerCase().replace(/[^a-z]/g, ''); }
 
 /* seed the full roster parsed from the MASTER DISPATCH sheet (K & L columns) */
 function seedFromSheet(): Driver[] {
@@ -111,12 +131,12 @@ export function importDriversCsv(text: string): { added: number; updated: number
     out.push(cur); return out.map((s) => s.trim().replace(/^"|"$/g, ''));
   };
   const first = parse(lines[0]).map((h) => h.toLowerCase());
-  const hasHeader = first.some((h) => ['name', 'driver', 'position', 'address', 'phone', 'constraint', 'constraints', 'ready', 'return', 'pattern'].includes(h));
-  const cols = hasHeader ? first : ['name', 'position', 'address', 'phone', 'constraints', 'ready', 'return', 'pattern'];
+  const hasHeader = first.some((h) => ['name', 'driver', 'position', 'homecity', 'home city', 'city', 'address', 'phone', 'constraint', 'constraints', 'ready', 'return', 'pattern'].includes(h));
+  const cols = hasHeader ? first : ['name', 'position', 'homecity', 'address', 'phone', 'constraints', 'ready', 'return', 'pattern'];
   const idx = (names: string[], def: number) => { const i = cols.findIndex((c) => names.includes(c)); return hasHeader ? i : def; };
-  const iName = idx(['name', 'driver'], 0), iPos = idx(['position', 'role'], 1), iAddr = idx(['address'], 2),
-    iPhone = idx(['phone', 'cell'], 3), iCon = idx(['constraints', 'constraint'], 4),
-    iReady = idx(['ready', 'readydate', 'ready to go'], 5), iRet = idx(['return', 'returndate'], 6), iPat = idx(['pattern', 'schedule'], 7);
+  const iName = idx(['name', 'driver'], 0), iPos = idx(['position', 'role'], 1), iHome = idx(['homecity', 'home city', 'city'], 2),
+    iAddr = idx(['address'], 3), iPhone = idx(['phone', 'cell'], 4), iCon = idx(['constraints', 'constraint'], 5),
+    iReady = idx(['ready', 'readydate', 'ready to go'], 6), iRet = idx(['return', 'returndate'], 7), iPat = idx(['pattern', 'schedule'], 8);
 
   const list = read(); const byName = new Map(list.map((d) => [d.name.toLowerCase(), d]));
   let added = 0, updated = 0;
@@ -125,6 +145,7 @@ export function importDriversCsv(text: string): { added: number; updated: number
     const c = parse(line); const name = (c[iName] ?? '').trim(); if (!name) continue;
     const rec = {
       name, position: (iPos >= 0 ? c[iPos] : '') || 'OTR Team',
+      homeCity: iHome >= 0 ? (c[iHome] ?? '') : '',
       address: iAddr >= 0 ? (c[iAddr] ?? '') : '', phone: iPhone >= 0 ? (c[iPhone] ?? '') : '',
       constraints: iCon >= 0 ? (c[iCon] ?? '') : '', readyDate: iReady >= 0 ? normDate(c[iReady]) : '',
       returnDate: iRet >= 0 ? normDate(c[iRet]) : '', pattern: iPat >= 0 ? (c[iPat] ?? '') : '',

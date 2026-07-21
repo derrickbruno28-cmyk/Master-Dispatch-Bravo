@@ -3,8 +3,11 @@ import {
   loadFleet, saveTruck, removeTruck, blankTruck, TERMINAL_LABELS, teamStatusMeta, isShutdown,
   type FleetTruck,
 } from '../data/fleetStore';
-import { driverNames, driverByName } from '../data/driversStore';
+import { driverNames, driverByName, driverHomeCity, cityKey } from '../data/driversStore';
 import { getOptions, addOption, type OptionKind } from '../data/optionsStore';
+import { canDelete } from '../data/permStore';
+import { onChange } from '../data/bus';
+import { useEffect } from 'react';
 
 /* Fleet Status = the team admin console. Add / edit / remove teams. Driver names
    autofill from the Master Drivers List; the Type / Home terminal / Status
@@ -19,12 +22,26 @@ function withConstraint(name: string): React.ReactNode {
   return <span>{name}{c ? <span className="drv-con"> ({c})</span> : null}</span>;
 }
 
+/* Cross-city pickup: driver 1 (the truck) picks up driver 2. When their home
+   cities differ it's a cross-city meet — surfaced so dispatch knows driver 1 has
+   to swing through another city to grab their teammate. Returns null when they
+   start in the same city or a home city is unknown. */
+function crossCityPickup(driver1: string, driver2: string): { c1: string; c2: string } | null {
+  const c1 = driverHomeCity(driver1), c2 = driverHomeCity(driver2);
+  if (!driver1 || !driver2 || !c1 || !c2) return null;
+  return cityKey(c1) === cityKey(c2) ? null : { c1, c2 };
+}
+
 export default function FleetStatusView() {
   const [fleet, setFleet] = useState<FleetTruck[]>(() => loadFleet());
   const [q, setQ] = useState('');
   const [editing, setEditing] = useState<FleetTruck | null>(null);
   const [isNew, setIsNew] = useState(false);
   const [confirmDel, setConfirmDel] = useState<string | null>(null);
+  const [canDel, setCanDel] = useState<boolean>(() => canDelete());
+
+  /* keep delete access + roster in sync (role switch / driver home-city edits) */
+  useEffect(() => onChange(() => { setFleet(loadFleet()); setCanDel(canDelete()); }), []);
 
   const rows = useMemo(() => {
     const n = q.trim().toLowerCase();
@@ -56,7 +73,13 @@ export default function FleetStatusView() {
             {rows.map((t) => (
               <tr key={t.tractor} className={isShutdown(t.status) ? 'fleet-shutdown' : ''}>
                 <td className="am-tractor">#{t.tractor} <span className="am-rating">{t.rating}</span></td>
-                <td>{[t.driver1, t.driver2].filter(Boolean).map((n, i) => <span key={i}>{i > 0 && ' · '}{withConstraint(n)}</span>)}{!t.driver1 && !t.driver2 && <span className="am-muted">—</span>}</td>
+                <td>
+                  {[t.driver1, t.driver2].filter(Boolean).map((n, i) => <span key={i}>{i > 0 && ' · '}{withConstraint(n)}</span>)}
+                  {!t.driver1 && !t.driver2 && <span className="am-muted">—</span>}
+                  {(() => { const x = crossCityPickup(t.driver1, t.driver2); return x
+                    ? <div className="fleet-pickup" title={`Cross-city meet — driver 1 swings through ${x.c2} to grab driver 2`}>🔀 {t.driver1.split(' ')[0]} ({x.c1}) picks up {t.driver2.split(' ')[0]} ({x.c2})</div>
+                    : null; })()}
+                </td>
                 <td className="am-muted">{t.type}</td>
                 <td>{TERMINAL_LABELS[t.homeCity] ?? t.homeCity}</td>
                 <td className="am-muted">{t.currentCity}</td>
@@ -73,7 +96,9 @@ export default function FleetStatusView() {
                   ) : (
                     <>
                       <button className="am-clear" onClick={() => { setEditing({ ...t }); setIsNew(false); }}>✎ Edit</button>
-                      <button className="fleet-del" onClick={() => setConfirmDel(t.tractor)}>🗑</button>
+                      {canDel
+                        ? <button className="fleet-del" onClick={() => setConfirmDel(t.tractor)}>🗑</button>
+                        : <button className="fleet-del" disabled title="Removing a team is restricted to FMT Lead / US Ops / Owner">🔒</button>}
                     </>
                   )}
                 </td>
@@ -149,6 +174,9 @@ function TruckEditor({ truck, isNew, onSave, onCancel }: { truck: FleetTruck; is
             </L>
           )}
         </div>
+        {(() => { const x = crossCityPickup(t.driver1, t.driver2); return x
+          ? <div className="fleet-pickup-hint">🔀 Cross-city pickup — <b>{t.driver1.split(' ')[0]}</b> ({x.c1}) picks up <b>{t.driver2.split(' ')[0]}</b> ({x.c2}). They don't start in the same city.</div>
+          : null; })()}
         <datalist id="fleet-drivers">{names.map((n) => <option key={n} value={n} />)}</datalist>
         <L t="Team / route notes (shows on the Asset Matrix)">
           <textarea className="am-input" rows={2} value={t.constraints} onChange={(e) => f('constraints', e.target.value)} />
