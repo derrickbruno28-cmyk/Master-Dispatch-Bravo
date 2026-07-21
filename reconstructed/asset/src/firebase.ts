@@ -24,7 +24,8 @@ export const ALLOWED_DOMAINS = [...new Set([
 ])];
 export const ALLOWED_DOMAIN = ALLOWED_DOMAINS[0];
 export function isCompanyEmail(email: string): boolean {
-  return ALLOWED_DOMAINS.some((d) => email.endsWith(`@${d}`));
+  const e = (email || '').trim().toLowerCase();
+  return ALLOWED_DOMAINS.some((d) => e.endsWith(`@${d.toLowerCase()}`));
 }
 
 /* Config resolves at RUNTIME from public/firebase-config.js (window.__ASSET_FB__)
@@ -85,14 +86,33 @@ async function popupOrRedirect(provider: GoogleAuthProvider): Promise<User> {
 export async function signInWithGoogle(): Promise<User> {
   if (!auth) throw new Error('Firebase not configured');
   const provider = new GoogleAuthProvider();
-  /* no `hd` hint — it only supports a single domain, and partners sign in too */
-  /* Redirect-primary: popups are fragile on phones and in privacy-hardened
-     desktop browsers (they surface as auth/popup-closed-by-user even when the
-     user did nothing). A full-page redirect works identically everywhere; the
-     work-email allowlist is enforced on the way back in AuthGate
-     (getRedirectResult + onAuthStateChanged → isCompanyEmail). */
-  await signInWithRedirect(auth, provider); // navigates away; page reloads
-  return new Promise<User>(() => {}); // unreachable — the redirect reloads the page
+  /* always let the user pick which Google account — avoids silently reusing a
+     personal account that then bounces at the work-email gate */
+  provider.setCustomParameters({ prompt: 'select_account' });
+
+  /* Popup-FIRST (Google's recommended flow). A full-page redirect "authenticates
+     then loops back to sign-in" in Safari and privacy-hardened browsers, because
+     the auth handler lives on a different domain (…firebaseapp.com) and the
+     post-redirect session is dropped by third-party-storage partitioning. The
+     popup completes in the same window context, so it survives. If the popup
+     can't run (blocked / closed / unsupported), fall back to the redirect — and
+     AuthGate finishes that via getRedirectResult + onAuthStateChanged. */
+  let result;
+  try {
+    result = await signInWithPopup(auth, provider);
+  } catch (e) {
+    const code = (e as { code?: string }).code ?? '';
+    if (code === 'auth/cancelled-popup-request') throw e; // double-invoke; let the first win
+    await signInWithRedirect(auth, provider); // navigates away; page reloads
+    return new Promise<User>(() => {}); // unreachable — the redirect reloads the page
+  }
+
+  const email = result.user.email ?? '';
+  if (!isCompanyEmail(email)) {
+    await fbSignOut(auth);
+    throw new Error("That account isn't authorized. Sign in with your approved work account.");
+  }
+  return result.user;
 }
 
 export async function signOut(): Promise<void> {
