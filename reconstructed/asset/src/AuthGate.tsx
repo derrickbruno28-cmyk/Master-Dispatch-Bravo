@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { onAuthStateChanged, type User } from 'firebase/auth';
+import { onAuthStateChanged, getRedirectResult, type User } from 'firebase/auth';
 import { auth, firebaseEnabled, signInWithGoogle, signOut, isCompanyEmail, ALLOWED_DOMAINS } from './firebase';
 
 /* AuthGate — mirrors the GH Driver Hub sign-in. When Firebase is configured
@@ -16,6 +16,9 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     if (!firebaseEnabled || !auth) { setReady(true); return; }
+    // On phones the popup is blocked, so sign-in happens via a full-page
+    // redirect; complete it here and surface any error.
+    getRedirectResult(auth).catch((e) => setErr((e as Error).message || 'Sign-in failed.'));
     return onAuthStateChanged(auth, (u) => {
       // enforce the work-email allowlist even on restored sessions
       if (u && u.email && !isCompanyEmail(u.email)) { void signOut(); setUser(null); }
