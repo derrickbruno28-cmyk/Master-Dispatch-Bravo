@@ -1,0 +1,54 @@
+name: Deploy Asset Matrix
+
+# Auto-deploys the Asset Matrix to Firebase Hosting (project asset-matrix-gh)
+# whenever the app changes on the working branch or main. No credentials ever
+# live in chat — the only secret is FIREBASE_TOKEN, stored in the repo's
+# encrypted Actions secrets (Settings -> Secrets and variables -> Actions).
+
+on:
+  push:
+    branches:
+      - claude/github-repo-test-shared-files-nzn5pe
+      - main
+    paths:
+      - 'reconstructed/asset/**'
+      - '.github/workflows/deploy-asset-matrix.yml'
+  workflow_dispatch: {}   # lets you deploy on demand from the Actions tab
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: reconstructed/asset
+    steps:
+      - name: Check out the repo
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: reconstructed/asset/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      # The Firebase WEB config is PUBLIC (it ships to every browser); security is
+      # enforced by Auth + Firestore rules, not by hiding these. Written at deploy
+      # time so local `npm run dev` stays in demo mode.
+      - name: Write runtime Firebase config
+        run: |
+          echo 'window.__ASSET_FB__ = { apiKey: "AIzaSyB8ChTmImGa-z4_64liGmmN5spHeuTd3SU", authDomain: "asset-matrix-gh.firebaseapp.com", projectId: "asset-matrix-gh", storageBucket: "asset-matrix-gh.firebasestorage.app", messagingSenderId: "485635602439", appId: "1:485635602439:web:bdadc90fc7da98676ad2a2" };' > dist/firebase-config.js
+
+      - name: Deploy to Firebase Hosting
+        run: npx --yes firebase-tools@15 deploy --only hosting --project asset-matrix-gh --token "$FIREBASE_TOKEN" --non-interactive
+        env:
+          FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}
