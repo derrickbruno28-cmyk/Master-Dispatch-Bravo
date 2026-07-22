@@ -37,10 +37,16 @@ export const ASSIGNABLE_ROLES: Role[] = ['fmt_lead', 'us_ops', 'fmt'];
    account or his @ghlogisticsllc.com work account */
 export const OWNER_EMAILS = ['derrick.bruno28@gmail.com', 'derrick@ghlogisticsllc.com'];
 
+/* Role MANAGERS can see the Roles tab and assign user roles (owner is always one).
+   The OWNER controls this list; seed it with the known managers (Caleb + Derrick's
+   work account). Add Anna's exact work email here or from the Roles tab. */
+export const DEFAULT_ROLE_MANAGERS = ['caleb@ghlogisticsllc.com'];
+
 /* new signed-in staff who haven't been assigned a role yet start edit-only */
 const DEFAULT_ROLE: Role = 'fmt';
 
 const ROLES_KEY = 'asset-user-roles-v1';      // { [email]: Role } — owner-managed
+const ROLE_MGR_KEY = 'asset-role-managers-v1';// [email] — who can see the Roles tab
 const SESSION_KEY = 'asset-session-email-v1'; // set by AuthGate (prod) / demo
 const DEMO_ROLE_KEY = 'asset-demo-role-v1';   // demo-only role preview
 
@@ -104,5 +110,31 @@ export function isOwner(): boolean { return currentRole() === 'owner'; }
 export function canDelete(): boolean { const r = currentRole(); return r === 'owner' || r === 'fmt_lead' || r === 'us_ops'; }
 /* add / edit / update info — any recognized role */
 export function canEdit(): boolean { return currentRole() !== ''; }
-/* assign user roles — owner only */
-export function canManageRoles(): boolean { return isOwner(); }
+
+/* ---- role managers: who can see the Roles tab + assign roles (owner-controlled) ---- */
+function readRoleManagers(): string[] {
+  try { const r = localStorage.getItem(ROLE_MGR_KEY); if (r) { const a = JSON.parse(r) as string[]; if (Array.isArray(a)) return a; } } catch { /* ignore */ }
+  return [...DEFAULT_ROLE_MANAGERS];
+}
+function writeRoleManagers(list: string[]) { try { localStorage.setItem(ROLE_MGR_KEY, JSON.stringify(list)); } catch { /* ignore */ } emitChange(); }
+/* the managed list, minus owner emails (owners are always managers, shown separately) */
+export function roleManagers(): string[] { return readRoleManagers().filter((e) => !isOwnerEmail(e)); }
+export function isRoleManager(email: string): boolean {
+  const e = norm(email); if (!e) return false;
+  return isOwnerEmail(e) || readRoleManagers().some((x) => norm(x) === e);
+}
+export function addRoleManager(email: string): void {
+  const e = norm(email); if (!e || isOwnerEmail(e)) return;
+  const list = readRoleManagers(); if (!list.some((x) => norm(x) === e)) list.push(e); writeRoleManagers(list);
+}
+export function removeRoleManager(email: string): void {
+  writeRoleManagers(readRoleManagers().filter((x) => norm(x) !== norm(email)));
+}
+
+/* assign user roles + SEE the Roles tab — owner or a designated role manager */
+export function canManageRoles(): boolean {
+  if (!firebaseEnabled) return demoRole() === 'owner'; // demo: only the owner preview
+  return isOwner() || isRoleManager(sessionEmail());
+}
+/* edit the role-manager list itself (who's allowed in the tab) — owner only */
+export function canManageRoleManagers(): boolean { return isOwner(); }

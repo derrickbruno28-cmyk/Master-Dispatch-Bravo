@@ -32,9 +32,12 @@ function crossCityPickup(driver1: string, driver2: string): { c1: string; c2: st
   return cityKey(c1) === cityKey(c2) ? null : { c1, c2 };
 }
 
-export default function FleetStatusView() {
+export default function FleetStatusView({ seed }: { seed?: { q: string; nonce: number } } = {}) {
   const [fleet, setFleet] = useState<FleetTruck[]>(() => loadFleet());
   const [q, setQ] = useState('');
+
+  /* global search can jump here pre-filtered to a team */
+  useEffect(() => { if (seed && seed.q) setQ(seed.q); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [seed?.nonce]);
   const [editing, setEditing] = useState<FleetTruck | null>(null);
   const [isNew, setIsNew] = useState(false);
   const [confirmDel, setConfirmDel] = useState<string | null>(null);

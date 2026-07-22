@@ -348,3 +348,35 @@
 .auth-role { color: var(--accent); font-weight: 600; }
 .fleet-pickup { margin-top: 3px; font-size: 10.5px; font-weight: 600; color: #d97706; background: rgba(217,119,6,0.10); border-radius: 5px; padding: 1px 6px; display: inline-block; }
 .fleet-pickup-hint { margin-top: 8px; font-size: 12px; color: #b45309; background: rgba(217,119,6,0.12); border: 1px solid rgba(217,119,6,0.35); border-radius: 8px; padding: 7px 10px; }
+
+/* ---- freeze table headers on vertical scroll (search/sticky batch) ---- */
+.am-scroll { max-height: calc(100vh - 200px); overflow: auto; }
+.am-grid th { z-index: 2; }
+.roles-scroll { max-height: 360px; }
+
+/* ---- global search in the top bar ---- */
+.asset-search { position: relative; display: flex; align-items: center; gap: 6px; flex: 0 1 300px; min-width: 150px;
+  margin-left: 14px; background: var(--panel-2, var(--panel)); border: 1px solid var(--border); border-radius: 9px; padding: 4px 9px; }
+.asset-search-icon { font-size: 12px; opacity: 0.7; }
+.asset-search-input { flex: 1; min-width: 0; border: none; background: transparent; color: var(--text); font: inherit; font-size: 13px; outline: none; }
+.asset-search-clear { border: none; background: transparent; color: var(--muted); cursor: pointer; font-size: 12px; line-height: 1; padding: 2px; }
+.asset-search-clear:hover { color: var(--text); }
+.asset-search-results { position: absolute; top: calc(100% + 6px); left: 0; width: 340px; max-width: 78vw; max-height: 60vh; overflow: auto;
+  background: var(--panel); border: 1px solid var(--border); border-radius: 11px; box-shadow: 0 10px 30px rgba(0,0,0,0.28); z-index: 60; padding: 6px; }
+.asset-search-empty { padding: 12px; color: var(--muted); font-size: 12.5px; }
+.asset-search-group { margin-bottom: 4px; }
+.asset-search-grouphead { font-size: 9.5px; text-transform: uppercase; letter-spacing: 0.7px; color: var(--muted); padding: 6px 8px 3px; }
+.asset-search-item { display: flex; align-items: baseline; gap: 8px; width: 100%; text-align: left; border: none; background: transparent;
+  color: var(--text); font: inherit; padding: 6px 8px; border-radius: 7px; cursor: pointer; }
+.asset-search-item:hover { background: var(--panel-2, rgba(127,127,127,0.12)); }
+.asset-search-item-label { font-size: 13px; font-weight: 600; }
+.asset-search-item-sub { font-size: 11px; color: var(--muted); margin-left: auto; white-space: nowrap; }
+@media (max-width: 900px) { .asset-search { flex-basis: 180px; } }
+
+/* ---- Roles & Access tab ---- */
+.roles-legend { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 10px; margin: 4px 0 14px; }
+.roles-legend-card { border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; background: var(--panel-2, var(--panel)); }
+.roles-legend-title { font-weight: 700; font-size: 13px; color: var(--accent); margin-bottom: 3px; }
+.roles-legend-desc { font-size: 11.5px; color: var(--muted); line-height: 1.45; }
+.roles-section { margin-top: 18px; }
+.roles-section-h { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text); margin-bottom: 8px; }

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   loadDrivers, saveDriver, removeDriver, blankDriver, importDriversCsv,
-  availabilityOf, daysUntil, AVAIL_PATTERNS,
+  availabilityOf, daysUntil, todayISO, AVAIL_PATTERNS,
   DEFAULT_POSITIONS, type Driver,
 } from '../data/driversStore';
 import { loadFleet } from '../data/fleetStore';
@@ -17,9 +17,12 @@ import { canDelete } from '../data/permStore';
 
 type SortKey = 'name' | 'position';
 
-export default function DriversView() {
+export default function DriversView({ seed }: { seed?: { q: string; nonce: number } } = {}) {
   const [drivers, setDrivers] = useState<Driver[]>(() => loadDrivers());
   const [q, setQ] = useState('');
+
+  /* global search can jump here pre-filtered to a driver */
+  useEffect(() => { if (seed && seed.q) setQ(seed.q); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [seed?.nonce]);
   const [posFilter, setPosFilter] = useState<string>('ALL');
   const [sortKey, setSortKey] = useState<SortKey>('name');
   const [sortDir, setSortDir] = useState<1 | -1>(1);
@@ -104,6 +107,35 @@ export default function DriversView() {
     if (fileRef.current) fileRef.current.value = '';
   }
 
+  /* Export the CURRENT (filtered) roster to CSV so it can be compared against an
+     existing driver list. Exports every column plus live availability + team status. */
+  function exportCsv() {
+    const esc = (v: string) => { const s = String(v ?? ''); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
+    const availLabel = (d: Driver) => {
+      const ts = (teamStatusByName.get(d.name.trim().toLowerCase()) || '').toLowerCase();
+      if (ts === 'ntb') return 'NTB — needs load';
+      const a = avail.get(d.id);
+      if (a?.assigned) return `Assigned (${a.assigned.route})`;
+      if (a?.available) return 'Available';
+      return !d.readyDate ? 'No ready date' : (a && a.daysLeft !== null && a.daysLeft < 0 ? 'Past due' : 'Out');
+    };
+    const cols = ['Name', 'Position', 'Home City', 'Phone', 'Address', 'Constraints', 'Ready Date', 'Return Date', 'Pattern', 'Review Flag', 'Availability', 'Team Status'];
+    const lines = [cols.join(',')];
+    for (const d of rows) {
+      lines.push([
+        d.name, d.position, d.homeCity, d.phone, d.address, d.constraints,
+        d.readyDate, d.returnDate, d.pattern, d.flag, availLabel(d),
+        teamStatusByName.get(d.name.trim().toLowerCase()) || '',
+      ].map(esc).join(','));
+    }
+    const blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = `asset-drivers-${todayISO()}.csv`;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+
   return (
     <div className="am-page">
       <div className="am-head">
@@ -112,6 +144,7 @@ export default function DriversView() {
         <span className="am-muted">{rows.length} of {drivers.length} drivers</span>
         <span className="drv-availtag"><span className="drv-led" /> {availCount} available</span>
         <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
+          <button className="am-clear" onClick={exportCsv} disabled={rows.length === 0} title="Download the current list as a CSV to compare with another roster">⭱ Export CSV</button>
           <button className="am-clear" onClick={() => setImportOpen((o) => !o)}>⭳ Import</button>
           <button className="am-save" onClick={() => { setEditing(blankDriver()); setIsNew(true); }}>＋ Add Driver</button>
         </div>
