@@ -25,10 +25,12 @@ const ThemeContext = createContext<{
   setPalette: (p: PaletteKey) => void;
 }>({ theme: 'dark', toggle: () => {}, palette: 'bravo', setPalette: () => {} });
 
-/* storage guarded so a sandboxed iframe (no same-origin) can't crash the app */
+/* storage guarded so a sandboxed iframe (no same-origin) can't crash the app.
+   (Previously these called THEMSELVES — infinite recursion — so the saved theme
+   and palette were silently never read or written.) */
 const ls = {
-  get(k: string): string | null { try { return ls.get(k); } catch { return null; } },
-  set(k: string, v: string) { try { ls.set(k, v); } catch { /* sandboxed */ } },
+  get(k: string): string | null { try { return localStorage.getItem(k); } catch { return null; } },
+  set(k: string, v: string) { try { localStorage.setItem(k, v); } catch { /* sandboxed */ } },
 };
 
 export function ThemeProvider({ children }: { children: ReactNode }) {
