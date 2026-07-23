@@ -1,13 +1,16 @@
 import { useEffect, useMemo, useState } from 'react';
-import { TERMINALS, TERMINAL_LABELS, ROUTES } from '../data/fleet';
+import { TERMINALS, TERMINAL_LABELS } from '../data/fleet';
 import { loadFleet, saveTruck, teamStatusMeta, isShutdown, type FleetTruck } from '../data/fleetStore';
 import { loadDrivers } from '../data/driversStore';
 import { onChange } from '../data/bus';
 import {
   loadAssignments, setAssignment, moveAssignment, ensureSeed, cellKey, parseCellKey,
-  isoDate, mondayOf, addDays, driverConflicts, type Assignment, type DriverConflict,
+  isoDate, mondayOf, addDays, driverConflicts, type Assignment,
 } from '../data/schedule';
 import { canDelete } from '../data/permStore';
+import LoadDetailModal from './LoadDetailModal';
+import { loadAll, moveLoadCell, clearLoadCell, type Load } from '../data/loadsStore';
+import { documentStore } from '../integrations/documents';
 
 /* Asset Matrix — the scheduling board for our OWN trucks.
    Rows = trucks grouped by home terminal (SA / Dallas / Memphis / Houston),
@@ -20,7 +23,6 @@ import { canDelete } from '../data/permStore';
    at yard → at shipper → en route → at receiver → delivered → completed
    (off = home/reset). */
 const STATUSES = ['open', 'covered', 'dispatched', 'at yard', 'at shipper', 'en route', 'at receiver', 'delivered', 'completed', 'off'] as const;
-type Status = typeof STATUSES[number];
 const STATUS_COLOR: Record<string, string> = {
   open: 'var(--muted)', covered: 'var(--green)', dispatched: '#00b8d4',
   'at yard': '#b0842a', 'at shipper': '#e8a33d', 'en route': 'var(--accent)',
@@ -33,13 +35,16 @@ const STATUS_LABEL: Record<string, string> = {
 };
 
 const DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-const ROUTE_OPTIONS = ROUTES.map((r) => r.route);
-function looksUSPS(s: string) { return /FA2D3|FA28D|7523D|HCR/i.test(s); }
 
 export default function AssetMatrixView() {
   const [weekStart, setWeekStart] = useState<Date>(() => mondayOf(new Date()));
   const [assign, setAssign] = useState<Record<string, Assignment>>(() => { ensureSeed(); return loadAssignments(); });
   const [editing, setEditing] = useState<string | null>(null);
+  const [editTab, setEditTab] = useState<'info' | 'dispatch' | undefined>(undefined);
+  const [creating, setCreating] = useState(false);
+  const [newTruck, setNewTruck] = useState('');
+  const [newDay, setNewDay] = useState(0);
+  const [docCounts, setDocCounts] = useState<Record<string, number>>({});
   const [termFilter, setTermFilter] = useState<string>('ALL');
   const [posFilter, setPosFilter] = useState<string>('ALL');
   const [confirmClear, setConfirmClear] = useState<string | null>(null);
@@ -50,6 +55,18 @@ export default function AssetMatrixView() {
   /* live sync: reload fleet + assignments whenever any store changes (e.g. a team
      is set NTB on the Fleet card) so the matrix stays congruent without a reload */
   useEffect(() => onChange(() => { setFleet(loadFleet()); setAssign(loadAssignments()); setCanDel(canDelete()); }), []);
+
+  /* rich-load index (cell → Load) + 📎 doc counts for the chips */
+  const loadsByCell = useMemo(() => {
+    const m = new Map<string, Load>();
+    for (const l of loadAll()) {
+      if (l.segments.length === 0) m.set(cellKey(l.assignedTruck, l.date), l);
+      else for (const s of l.segments) m.set(cellKey(s.assignedTruck, l.date), l);
+    }
+    return m;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [assign, fleet]);
+  useEffect(() => { void documentStore().countByLoad().then(setDocCounts); }, [assign, editing]);
 
   /* transient inline notice — replaces window.alert (blocked in sandboxes) */
   function flash(msg: string) { setNotice(msg); window.setTimeout(() => setNotice(''), 3200); }
@@ -99,7 +116,8 @@ export default function AssetMatrixView() {
     /* delete gate: clearing a load requires delete access; adding/editing is open */
     if (clear && !canDel) { flash('🔒 Deleting a load is restricted — unlock delete access in the header.'); setEditing(null); setConfirmClear(null); return; }
     setAssign((prev) => { const next = { ...prev }; if (clear) delete next[k]; else next[k] = a; return next; });
-    setEditing(null);
+    setEditing(null); setEditTab(undefined);
+    if (clear) clearLoadCell(tractor, date);
     void setAssignment(tractor, date, clear ? null : a);
   }
 
@@ -110,6 +128,7 @@ export default function AssetMatrixView() {
       const a = prev[fromKey]; if (!a) return prev;
       const next = { ...prev }; delete next[fromKey]; next[toKey] = a; return next;
     });
+    moveLoadCell(fromKey, toKey);
     void moveAssignment(fromKey, toKey);
   }
 
@@ -134,7 +153,20 @@ export default function AssetMatrixView() {
             {positions.map((p) => <option key={p} value={p}>{p}</option>)}
           </select>
           <span className="am-muted">{weekTotal} assigned this week</span>
+          <button className="am-save fleet-add" onClick={() => { setCreating((c) => !c); setNewTruck(fleet[0]?.tractor ?? ''); }}>➕ Create Load</button>
         </div>
+        {creating && (
+          <div className="load-create-row">
+            <select className="am-input" value={newTruck} onChange={(e) => setNewTruck(e.target.value)}>
+              {fleet.map((t) => <option key={t.tractor} value={t.tractor}>#{t.tractor} — {[t.driver1, t.driver2].filter(Boolean).join(' / ') || t.type}</option>)}
+            </select>
+            <select className="am-input" value={newDay} onChange={(e) => setNewDay(Number(e.target.value))}>
+              {DAYS.map((d, i) => <option key={d} value={i}>{d} {dates[i]?.slice(5)}</option>)}
+            </select>
+            <button className="am-save" disabled={!newTruck} onClick={() => { setEditing(cellKey(newTruck, dates[newDay])); setEditTab('info'); setCreating(false); }}>Open load</button>
+            <button className="am-cancel" onClick={() => setCreating(false)}>✕</button>
+          </div>
+        )}
         <div className="am-legend">
           {STATUSES.map((s) => (
             <span key={s} className="am-legend-item">
@@ -167,31 +199,48 @@ export default function AssetMatrixView() {
                 trucks={byTerminal[term] ?? []}
                 dates={dates}
                 assign={assign}
-                editing={editing}
-                setEditing={setEditing}
+                setEditing={(k) => { setEditing(k); setEditTab('info'); }}
+                openDispatch={(k) => { setEditing(k); setEditTab('dispatch'); }}
+                loads={loadsByCell}
+                docCounts={docCounts}
                 save={save}
                 move={move}
                 confirmClear={confirmClear}
                 setConfirmClear={setConfirmClear}
                 flash={flash}
-                fleet={fleet}
                 canDel={canDel}
               />
             ))}
           </tbody>
         </table>
       </div>
+
+      {editing && (() => {
+        const { tractor, date } = parseCellKey(editing);
+        const conflicts = driverConflicts(tractor, date, assign, fleet);
+        return (
+          <LoadDetailModal
+            tractor={tractor} date={date} assignment={assign[editing]} canDel={canDel} initialTab={editTab}
+            warning={conflicts.length ? `⚠ Double-book: ${conflicts.map((c) => `${c.driver} is already on #${c.tractor}`).join('; ')} this day.` : undefined}
+            onSave={(a) => save(editing, a)}
+            onClear={() => save(editing, { route: '', status: 'covered', usps: false })}
+            onClose={() => { setEditing(null); setEditTab(undefined); }}
+          />
+        );
+      })()}
     </div>
   );
 }
 
-function TerminalRows({ term, trucks, dates, assign, editing, setEditing, save, move, confirmClear, setConfirmClear, flash, fleet, canDel }: {
+function TerminalRows({ term, trucks, dates, assign, setEditing, openDispatch, loads, docCounts, save, move, confirmClear, setConfirmClear, flash, canDel }: {
   term: string; trucks: FleetTruck[]; dates: string[];
-  assign: Record<string, Assignment>; editing: string | null;
-  setEditing: (k: string | null) => void; save: (k: string, a: Assignment) => void;
+  assign: Record<string, Assignment>;
+  setEditing: (k: string) => void; openDispatch: (k: string) => void;
+  loads: Map<string, Load>; docCounts: Record<string, number>;
+  save: (k: string, a: Assignment) => void;
   move: (fromKey: string, toKey: string) => void;
   confirmClear: string | null; setConfirmClear: (k: string | null) => void;
-  flash: (msg: string) => void; fleet: FleetTruck[]; canDel: boolean;
+  flash: (msg: string) => void; canDel: boolean;
 }) {
   const teams = trucks.filter((t) => (t.driver2 || '').trim());
   const solos = trucks.filter((t) => !(t.driver2 || '').trim());
@@ -232,7 +281,6 @@ function TerminalRows({ term, trucks, dates, assign, editing, setEditing, save, 
             const a = assign[k];
             const done = a && (a.status === 'delivered' || a.status === 'completed');
             const nextA = di < dates.length - 1 ? assign[cellKey(t.tractor, dates[di + 1])] : undefined;
-            if (editing === k) return <td key={d} className="am-cell"><CellEditor init={a} conflicts={driverConflicts(t.tractor, d, assign, fleet)} canDel={canDel} onSave={(x) => save(k, x)} onCancel={() => setEditing(null)} /></td>;
             return (
               <td
                 key={d}
@@ -255,6 +303,16 @@ function TerminalRows({ term, trucks, dates, assign, editing, setEditing, save, 
                       {a.usps && <span className="am-usps">USPS</span>}
                     </div>
                     <div className="am-status" style={{ color: STATUS_COLOR[a.status] }}>{STATUS_LABEL[a.status] ?? a.status}</div>
+                    {(() => {
+                      const ld = loads.get(k); const dc = ld ? (docCounts[ld.id] ?? 0) : 0;
+                      return (
+                        <div className="am-chipbadges">
+                          {dc > 0 && <span className="am-docbadge" title={`${dc} document${dc > 1 ? 's' : ''}`}>📎{dc}</span>}
+                          {ld?.dispatchedAt && <span className="am-sentbadge" title="Dispatched — flyer sent">⚡sent</span>}
+                          <button className="am-zap" title="Dispatch driver — load sheet" onClick={(e) => { e.stopPropagation(); openDispatch(k); }}>⚡</button>
+                        </div>
+                      );
+                    })()}
                     {done && (nextA
                       ? <div className="am-next am-next-ok">→ next: {nextA.route.split(' ')[0]}</div>
                       : <div className="am-next am-next-need">🔴 Needs next load</div>)}
@@ -285,38 +343,4 @@ function TerminalRows({ term, trucks, dates, assign, editing, setEditing, save, 
   );
 }
 
-function CellEditor({ init, conflicts, canDel, onSave, onCancel }: { init?: Assignment; conflicts: DriverConflict[]; canDel: boolean; onSave: (a: Assignment) => void; onCancel: () => void }) {
-  const [route, setRoute] = useState(init?.route ?? '');
-  const [status, setStatus] = useState<Status>((init?.status as Status) ?? 'covered');
-  const [usps, setUsps] = useState(init?.usps ?? true);
-  const [uspsTouched, setUspsTouched] = useState(false);
-  function changeRoute(v: string) { setRoute(v); if (!uspsTouched) setUsps(looksUSPS(v)); }
-  /* double-booking guard: warn only when actually assigning a route (not clearing);
-     the same cell already held this driver's route, so editing it isn't a new book */
-  const hasConflict = conflicts.length > 0 && !!route.trim();
-  return (
-    <div className="am-editor" onClick={(e) => e.stopPropagation()}>
-      <input className="am-input" autoFocus list="am-routes" placeholder="Pick or type a route…" value={route}
-        onChange={(e) => changeRoute(e.target.value)}
-        onKeyDown={(e) => { if (e.key === 'Enter') onSave({ route, status, usps }); if (e.key === 'Escape') onCancel(); }} />
-      <datalist id="am-routes">{ROUTE_OPTIONS.map((r) => <option key={r} value={r} />)}</datalist>
-      <select className="am-input" value={status} onChange={(e) => setStatus(e.target.value as Status)}>
-        {STATUSES.map((s) => <option key={s} value={s}>{STATUS_LABEL[s]}</option>)}
-      </select>
-      <label className="am-usps-check"><input type="checkbox" checked={usps} onChange={(e) => { setUsps(e.target.checked); setUspsTouched(true); }} /> USPS contract route</label>
-      {hasConflict && (
-        <div className="am-dblbook">
-          ⚠ Double-book: {conflicts.map((c) => `${c.driver} is already on #${c.tractor} (${c.route.split(' ')[0]})`).join('; ')} this day.
-        </div>
-      )}
-      <div className="am-editor-btns">
-        <button className={hasConflict ? 'am-save am-save-warn' : 'am-save'} onClick={() => onSave({ route, status, usps })}>{hasConflict ? 'Assign anyway' : 'Save'}</button>
-        {init && (canDel
-          ? <button className="am-clear" onClick={() => onSave({ route: '', status, usps })}>Clear</button>
-          : <button className="am-clear" disabled title="Deleting is restricted — unlock delete access in the header">🔒 Clear</button>)}
-        <button className="am-cancel" onClick={onCancel}>✕</button>
-      </div>
-    </div>
-  );
-}
 

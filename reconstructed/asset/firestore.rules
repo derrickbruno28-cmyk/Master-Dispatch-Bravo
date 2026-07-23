@@ -8,6 +8,9 @@ service cloud.firestore {
         && (request.auth.token.email.matches('.*@ghlogisticsllc[.]com$')
             || request.auth.token.email.matches('.*@ajgtransport[.]com$'));
     }
+    // Covers every collection the app uses: assetSchedule (board cells),
+    // loads (rich load records + segments), customers, loadDocuments (doc
+    // metadata when the Firebase DocumentStore is enabled). All company-only.
     match /{document=**} {
       allow read, write: if isCompany();
     }
