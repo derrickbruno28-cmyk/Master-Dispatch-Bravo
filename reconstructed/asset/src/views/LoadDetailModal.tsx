@@ -3,7 +3,8 @@ import html2canvas from 'html2canvas';
 import { jsPDF } from 'jspdf';
 import {
   blankLoad, loadForCell, saveLoad, clearLoadCell, missingForDispatch,
-  fmtMoney, fmtMiles, fmtCpm, type Load, type LoadStop, blankStop,
+  buildSegments, proportionRevenue, loadTotals, handoffLabel, syncSegmentAssignments, loadTrucks,
+  fmtMoney, fmtMiles, fmtCpm, type Load, type LoadStop, type LoadSegment, blankStop,
 } from '../data/loadsStore';
 import { loadCustomers, ensureCustomer, LOAD_TYPES, EQUIPMENT_TYPES } from '../data/customersStore';
 import { loadFleet, saveTruck } from '../data/fleetStore';
@@ -19,7 +20,7 @@ import type { Assignment } from '../data/schedule';
 
 const STATUSES = ['open', 'covered', 'dispatched', 'at yard', 'at shipper', 'en route', 'at receiver', 'delivered', 'completed', 'off'];
 
-type Tab = 'info' | 'stops' | 'customer' | 'docs' | 'dispatch';
+type Tab = 'info' | 'stops' | 'customer' | 'docs' | 'split' | 'dispatch';
 
 export default function LoadDetailModal({ tractor, date, assignment, canDel, initialTab, warning, onSave, onClear, onClose }: {
   tractor: string; date: string; assignment?: Assignment; canDel: boolean; initialTab?: Tab; warning?: string;
@@ -32,6 +33,7 @@ export default function LoadDetailModal({ tractor, date, assignment, canDel, ini
   });
   const [tab, setTab] = useState<Tab>(initialTab ?? 'info');
   const [notice, setNotice] = useState('');
+  const prevTrucks = useRef<string[]>(loadTrucks(l));
   const f = <K extends keyof Load>(k: K, v: Load[K]) => setL((p) => ({ ...p, [k]: v }));
 
   const missing = missingForDispatch(l);
@@ -46,6 +48,13 @@ export default function LoadDetailModal({ tractor, date, assignment, canDel, ini
   async function saveAndClose() {
     if (!l.routeName.trim()) { setNotice('Route name is required to place the load on the board.'); setTab('info'); return; }
     const saved = await persist();
+    if (saved.segments.length > 0) {
+      /* split load: write a board cell per segment truck (and clear dropped ones) */
+      await syncSegmentAssignments(saved, prevTrucks.current);
+      prevTrucks.current = loadTrucks(saved);
+      onClose();
+      return;
+    }
     onSave({ route: saved.routeName, status: saved.status, usps: saved.uspsContract });
   }
 
@@ -73,7 +82,7 @@ export default function LoadDetailModal({ tractor, date, assignment, canDel, ini
 
         {/* tabs */}
         <div className="load-tabs">
-          {([['info', 'Load Info'], ['stops', 'Stops'], ['customer', 'Customer'], ['docs', 'Documents'], ['dispatch', 'Dispatch']] as [Tab, string][]).map(([k, lab]) => (
+          {([['info', 'Load Info'], ['stops', 'Stops'], ['customer', 'Customer'], ['docs', 'Documents'], ['split', l.segments.length ? `✂ Split (${l.segments.length})` : '✂ Split'], ['dispatch', 'Dispatch']] as [Tab, string][]).map(([k, lab]) => (
             <button key={k} className={`load-tab ${tab === k ? 'on' : ''}`} onClick={() => setTab(k)}>{lab}</button>
           ))}
         </div>
@@ -85,12 +94,24 @@ export default function LoadDetailModal({ tractor, date, assignment, canDel, ini
         {tab === 'stops' && <StopsTab l={l} setL={setL} />}
         {tab === 'customer' && <CustomerTab l={l} f={f} />}
         {tab === 'docs' && <DocsTab loadId={l.id} />}
+        {tab === 'split' && <SplitTab l={l} setL={setL} persist={persist} />}
         {tab === 'dispatch' && (
           <DispatchTab l={l} missing={missing} flash={setNotice}
             onDispatched={async (sendTo) => {
-              const saved = await persist({ status: 'dispatched', dispatchedAt: new Date().toISOString() });
-              const t = loadFleet().find((x) => x.tractor === saved.assignedTruck);
-              if (t) saveTruck({ ...t, flyer: sendTo === 'team' ? 'team' : 'driver' });
+              const saved = await persist({
+                status: 'dispatched', dispatchedAt: new Date().toISOString(),
+                segments: l.segments.map((s) => ({ ...s, status: 'dispatched' })),
+              });
+              for (const truck of loadTrucks(saved)) {
+                const t = loadFleet().find((x) => x.tractor === truck);
+                if (t) saveTruck({ ...t, flyer: sendTo === 'team' ? 'team' : 'driver' });
+              }
+              if (saved.segments.length > 0) {
+                await syncSegmentAssignments(saved, prevTrucks.current);
+                prevTrucks.current = loadTrucks(saved);
+                onClose();
+                return;
+              }
               onSave({ route: saved.routeName, status: 'dispatched', usps: saved.uspsContract });
             }} />
         )}
@@ -294,6 +315,107 @@ function DocsTab({ loadId }: { loadId: string }) {
   );
 }
 
+/* ---------------- Split / relay ---------------- */
+function SplitTab({ l, setL, persist }: { l: Load; setL: React.Dispatch<React.SetStateAction<Load>>; persist: (n?: Partial<Load>) => Promise<Load> }) {
+  const sorted = useMemo(() => l.stops.slice().sort((a, b) => a.sequence - b.sequence), [l.stops]);
+  const teams = useMemo(() => loadFleet(), []);
+  const [cut, setCut] = useState(1);
+  const totals = loadTotals(l);
+
+  async function splitAt(i: number) {
+    const withSegs = { ...l, segments: buildSegments(l, [i]) };
+    const priced = proportionRevenue(await persist(withSegs)); // persist recalcs segment miles
+    setL(await persist(priced));
+  }
+  async function addCutHere() {
+    const cuts = new Set(l.segments.slice(0, -1).map((s) => s.toStop)); cuts.add(cut);
+    const withSegs = { ...l, segments: buildSegments(l, [...cuts]) };
+    setL(await persist(proportionRevenue(await persist(withSegs))));
+  }
+  async function unsplit() { setL(await persist({ segments: [] })); }
+  async function updSeg(i: number, patch: Partial<LoadSegment>) {
+    const segments = l.segments.map((s, j) => (j === i ? { ...s, ...patch } : s));
+    setL(await persist({ segments }));
+  }
+
+  if (l.segments.length === 0) {
+    return (
+      <div className="load-fields" style={{ maxWidth: 560 }}>
+        <p className="am-muted" style={{ fontSize: 12.5 }}>
+          Split a load at a shuttle / relay stop so each leg runs on its own truck (e.g. a solo shipper→shuttle,
+          then a team shuttle→receiver). Revenue and miles attribute to each segment's truck.
+        </p>
+        {sorted.length < 3
+          ? <div className="load-missing">Add at least 3 stops (a shuttle/handoff between pickup and delivery) on the Stops tab first.</div>
+          : (
+            <div className="split-choose">
+              <span>✂ Split at stop:</span>
+              <select className="am-input" style={{ maxWidth: 320 }} value={cut} onChange={(e) => setCut(Number(e.target.value))}>
+                {sorted.map((s, i) => (i > 0 && i < sorted.length - 1)
+                  ? <option key={i} value={i}>#{s.sequence} {s.type} — {[s.city, s.state].filter(Boolean).join(', ') || s.address || 'stop'}</option>
+                  : null)}
+              </select>
+              <button className="am-save" onClick={() => splitAt(cut)}>Split here</button>
+            </div>
+          )}
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      <div className="split-totals">
+        <Sum label="Total Revenue" val={fmtMoney(totals.revenue)} money />
+        <Sum label="Total Miles" val={fmtMiles(totals.miles)} />
+        <Sum label="Blended CPM" val={fmtCpm(totals.blendedCpm)} />
+        <Sum label="Segments" val={String(totals.segments)} />
+        <Sum label="Trucks used" val={String(totals.trucks)} />
+        <button className="am-clear" style={{ marginLeft: 'auto' }} onClick={unsplit}>↺ Un-split</button>
+      </div>
+      {l.segments.map((s, i) => (
+        <div key={s.id}>
+          <div className="split-seg">
+            <div className="split-seg-head">
+              <b>{s.label}</b>
+              <span className="am-muted">stops #{sorted[s.fromStop]?.sequence}→#{sorted[s.toStop]?.sequence}</span>
+              <span className="split-seg-cpm">{fmtMoney(s.segmentRevenue)} · {fmtMiles(s.segmentMiles)} · {fmtCpm(s.segmentCpm)}</span>
+            </div>
+            <div className="load-three">
+              <label className="otp-field"><span className="otp-field-label">Truck / team</span>
+                <select className="am-input" value={s.assignedTruck} onChange={(e) => updSeg(i, { assignedTruck: e.target.value, assignedTeamId: e.target.value })}>
+                  <option value="">— unassigned —</option>
+                  {teams.map((t) => <option key={t.tractor} value={t.tractor}>#{t.tractor} — {[t.driver1, t.driver2].filter(Boolean).join(' / ') || t.type}</option>)}
+                </select>
+              </label>
+              <label className="otp-field"><span className="otp-field-label">Segment revenue $</span>
+                <input className="am-input load-rate-input" type="number" value={s.segmentRevenue ?? ''} onChange={(e) => updSeg(i, { segmentRevenue: e.target.value === '' ? null : Number(e.target.value) })} />
+              </label>
+              <label className="otp-field"><span className="otp-field-label">Status</span>
+                <select className="am-input" value={s.status} onChange={(e) => updSeg(i, { status: e.target.value })}>
+                  {STATUSES.map((x) => <option key={x} value={x}>{x}</option>)}
+                </select>
+              </label>
+            </div>
+          </div>
+          {i < l.segments.length - 1 && <div className="split-handoff">⇄ shuttle handoff · {handoffLabel(l, i)}</div>}
+        </div>
+      ))}
+      {sorted.length - 1 - l.segments.length >= 0 && sorted.length > l.segments.length + 1 && (
+        <div className="split-choose" style={{ marginTop: 10 }}>
+          <span>Add another cut at stop:</span>
+          <select className="am-input" style={{ maxWidth: 260 }} value={cut} onChange={(e) => setCut(Number(e.target.value))}>
+            {sorted.map((s, i) => (i > 0 && i < sorted.length - 1)
+              ? <option key={i} value={i}>#{s.sequence} — {[s.city, s.state].filter(Boolean).join(', ') || 'stop'}</option>
+              : null)}
+          </select>
+          <button className="am-save" onClick={addCutHere}>＋ Cut</button>
+        </div>
+      )}
+      <p className="am-muted" style={{ fontSize: 11.5, marginTop: 8 }}>Save writes each segment onto its truck's board row. Dispatch generates a separate driver sheet per segment.</p>
+    </div>
+  );
+}
+
 /* ---------------- Dispatch (sheet → clipboard PNG / PDF) ---------------- */
 function DispatchTab({ l, missing, flash, onDispatched }: {
   l: Load; missing: string[]; flash: (m: string) => void;
@@ -301,8 +423,15 @@ function DispatchTab({ l, missing, flash, onDispatched }: {
 }) {
   const [sendTo, setSendTo] = useState<'both' | 'team'>('both');
   const [inc, setInc] = useState({ stops: true, rate: true, ref: true, commodity: true, authority: true, notes: true });
+  const [segIdx, setSegIdx] = useState(0);
   const sheetRef = useRef<HTMLDivElement>(null);
-  const team = loadFleet().find((t) => t.tractor === l.assignedTruck);
+  const allSorted = l.stops.slice().sort((a, b) => a.sequence - b.sequence);
+  const isSplit = l.segments.length > 0;
+  const seg = isSplit ? l.segments[Math.min(segIdx, l.segments.length - 1)] : null;
+  const activeTruck = seg ? seg.assignedTruck : l.assignedTruck;
+  const activeStops = seg ? allSorted.slice(seg.fromStop, seg.toStop + 1) : allSorted;
+  const activeRevenue = seg ? seg.segmentRevenue : l.rate;
+  const team = loadFleet().find((t) => t.tractor === activeTruck);
 
   async function toCanvas() {
     if (!sheetRef.current) return null;
@@ -328,11 +457,18 @@ function DispatchTab({ l, missing, flash, onDispatched }: {
   const chk = (k: keyof typeof inc, lab: string) => (
     <label className="load-inc"><input type="checkbox" checked={inc[k]} onChange={(e) => setInc((p) => ({ ...p, [k]: e.target.checked }))} />{lab}</label>
   );
-  const sorted = l.stops.slice().sort((a, b) => a.sequence - b.sequence);
+  const sorted = activeStops;
 
   return (
     <div className="load-dispatch-grid">
       <div>
+        {isSplit && (
+          <L t={`Segment (${l.segments.length}) — a separate sheet per leg`}>
+            <select className="am-input" value={segIdx} onChange={(e) => setSegIdx(Number(e.target.value))}>
+              {l.segments.map((s, i) => <option key={s.id} value={i}>{s.label} · #{s.assignedTruck || '—'} · {handoffLabel(l, i - 1 < 0 ? 0 : i)}</option>)}
+            </select>
+          </L>
+        )}
         <L t="Send to"><select className="am-input" value={sendTo} onChange={(e) => setSendTo(e.target.value as 'both' | 'team')}>
           <option value="both">Both drivers</option><option value="team">Team only</option>
         </select></L>
@@ -359,14 +495,15 @@ function DispatchTab({ l, missing, flash, onDispatched }: {
             <div style={{ fontWeight: 800, fontSize: 18, color: '#1e3a8a' }}>GH LOGISTICS</div>
             <div style={{ fontSize: 11, color: '#6b7280' }}>DRIVER LOAD SHEET</div>
           </div>
-          <div style={{ fontSize: 15, fontWeight: 700, margin: '10px 0 2px' }}>{l.routeName || 'Load'}</div>
+          <div style={{ fontSize: 15, fontWeight: 700, margin: '10px 0 2px' }}>{l.routeName || 'Load'}{seg && ` — ${seg.label}`}</div>
           <div style={{ fontSize: 11, color: '#6b7280', marginBottom: 8 }}>
-            Truck #{l.assignedTruck}{team && (sendTo === 'both' ? ` · ${[team.driver1, team.driver2].filter(Boolean).join(' & ')}` : ' · Team')} · {l.date}
+            Truck #{activeTruck}{team && (sendTo === 'both' ? ` · ${[team.driver1, team.driver2].filter(Boolean).join(' & ')}` : ' · Team')} · {l.date}
+            {seg && ` · leg ${segIdx + 1} of ${l.segments.length}`}
           </div>
           <table style={{ width: '100%', fontSize: 12, borderCollapse: 'collapse' }}><tbody>
             <Row k="Equipment" v={l.equipment || '—'} />
             {inc.commodity && <Row k="Commodity / Wt" v={[l.commodity, l.weight].filter(Boolean).join(' · ') || '—'} />}
-            {inc.rate && <Row k="Rate" v={fmtMoney(l.rate)} strong />}
+            {inc.rate && <Row k={seg ? 'Segment rate' : 'Rate'} v={fmtMoney(activeRevenue)} strong />}
             {inc.ref && <Row k="Ref / Conf #" v={l.referenceNo || '—'} />}
             {inc.authority && <Row k="Booking auth." v={l.bookingAuthority || '—'} />}
           </tbody></table>

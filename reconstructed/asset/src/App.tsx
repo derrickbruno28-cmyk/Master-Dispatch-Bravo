@@ -8,6 +8,7 @@ import CoveredView from './views/CoveredView';
 import FleetStatusView from './views/FleetStatusView';
 import DriversView from './views/DriversView';
 import RolesView from './views/RolesView';
+import FinancialsView, { type FinPage } from './views/FinancialsView';
 import { loadDrivers } from './data/driversStore';
 import { loadFleet } from './data/fleetStore';
 import { ROUTES } from './data/fleet';
@@ -22,7 +23,8 @@ import { onChange } from './data/bus';
 
 const APP_VERSION = '0.5.0';
 
-type Tab = 'matrix' | 'optimizer' | 'otp' | 'covered' | 'fleet' | 'drivers' | 'roles';
+type Tab = 'matrix' | 'optimizer' | 'otp' | 'covered' | 'fleet' | 'drivers' | 'roles'
+  | 'fin-cpm' | 'fin-customer' | 'fin-truck' | 'fin-miles';
 const TABS: { key: Tab; label: string; managerOnly?: boolean }[] = [
   { key: 'matrix', label: '🗓 Asset Matrix' },
   { key: 'optimizer', label: '⚡ Route Optimizer' },
@@ -32,6 +34,14 @@ const TABS: { key: Tab; label: string; managerOnly?: boolean }[] = [
   { key: 'drivers', label: '👤 Drivers' },
   { key: 'roles', label: '🔑 Roles', managerOnly: true },
 ];
+/* Financials ▾ — a dropdown, not full-width tabs (per the nav-restructure spec) */
+const FIN_ITEMS: { key: Tab; page: FinPage; label: string }[] = [
+  { key: 'fin-cpm', page: 'cpm', label: 'Revenue / CPM' },
+  { key: 'fin-customer', page: 'customer', label: 'Revenue by Customer' },
+  { key: 'fin-truck', page: 'truck', label: 'Revenue by Truck / Team' },
+  { key: 'fin-miles', page: 'miles', label: 'Driver Miles' },
+];
+const finPageOf = (t: Tab): FinPage | null => FIN_ITEMS.find((f) => f.key === t)?.page ?? null;
 
 interface Hit { kind: 'driver' | 'team' | 'route'; label: string; sub: string; q: string; go: Tab }
 
@@ -40,6 +50,7 @@ export default function App() {
   const { theme, toggle } = useTheme();
   const [query, setQuery] = useState('');
   const [openResults, setOpenResults] = useState(false);
+  const [finOpen, setFinOpen] = useState(false);
   const [seedDrivers, setSeedDrivers] = useState<{ q: string; nonce: number }>({ q: '', nonce: 0 });
   const [seedFleet, setSeedFleet] = useState<{ q: string; nonce: number }>({ q: '', nonce: 0 });
   const [, force] = useState(0);
@@ -151,6 +162,16 @@ export default function App() {
               {t.label}
             </button>
           ))}
+          <span className="asset-dropdown" onMouseLeave={() => setFinOpen(false)}>
+            <button className={`asset-tab ${finPageOf(tab) ? 'on' : ''}`} onClick={() => setFinOpen((o) => !o)}>💰 Financials ▾</button>
+            {finOpen && (
+              <div className="asset-dropdown-menu">
+                {FIN_ITEMS.map((f) => (
+                  <button key={f.key} className={`asset-dropdown-item ${tab === f.key ? 'on' : ''}`} onClick={() => { setTab(f.key); setFinOpen(false); }}>{f.label}</button>
+                ))}
+              </div>
+            )}
+          </span>
         </nav>
         <div className="asset-right">
           <button className="asset-icon-btn" onClick={toggle} title="Toggle light / dark">{theme === 'dark' ? '☀' : '☾'}</button>
@@ -166,6 +187,7 @@ export default function App() {
         {tab === 'fleet' && <FleetStatusView seed={seedFleet} />}
         {tab === 'drivers' && <DriversView seed={seedDrivers} />}
         {tab === 'roles' && showRoles && <RolesView />}
+        {finPageOf(tab) && <FinancialsView page={finPageOf(tab)!} />}
       </main>
     </div>
   );

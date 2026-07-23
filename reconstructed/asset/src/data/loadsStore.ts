@@ -12,7 +12,7 @@
 import { db, firebaseEnabled } from '../firebase';
 import { doc, setDoc, deleteDoc } from 'firebase/firestore';
 import { emitChange } from './bus';
-import { cellKey } from './schedule';
+import { cellKey, setAssignment } from './schedule';
 import { routingProvider, type RoutePoint } from '../integrations/routing';
 
 export interface LoadStop {
@@ -140,17 +140,126 @@ export function clearLoadCell(tractor: string, date: string) {
 }
 
 /* ---- mileage & CPM (RoutingProvider — estimate now, exact later) ---- */
+const toPts = (stops: LoadStop[]): RoutePoint[] =>
+  stops.slice().sort((a, b) => a.sequence - b.sequence).map((s) => ({ city: s.city, state: s.state, address: s.address }));
+
 export async function recalcMiles(l: Load): Promise<Load> {
-  const pts: RoutePoint[] = l.stops
-    .slice().sort((a, b) => a.sequence - b.sequence)
-    .map((s) => ({ city: s.city, state: s.state, address: s.address }));
+  const sorted = l.stops.slice().sort((a, b) => a.sequence - b.sequence);
+  const pts = toPts(l.stops);
   const miles = pts.length >= 2 ? await routingProvider().laneMiles(pts) : null;
   const cpm = miles && l.rate ? Math.round((l.rate / miles) * 100) / 100 : null;
+  /* per-segment miles = the stop sub-range each segment covers (fromStop/toStop
+     are indexes into the sequence-sorted stop list) */
+  const segments: LoadSegment[] = [];
+  for (const s of l.segments) {
+    const slice = sorted.slice(s.fromStop, s.toStop + 1);
+    const segMiles = slice.length >= 2 ? await routingProvider().laneMiles(toPts(slice)) : null;
+    segments.push({
+      ...s,
+      segmentMiles: segMiles,
+      segmentCpm: segMiles && s.segmentRevenue ? Math.round((s.segmentRevenue / segMiles) * 100) / 100 : null,
+    });
+  }
+  return { ...l, laneMiles: miles, cpm, segments };
+}
+
+/* ---- split / relay ------------------------------------------------------- */
+/** split at the sorted-stop indexes in `cuts` (each cut = handoff/shuttle stop).
+    2 segments = one cut. Revenue defaults to a miles-proportional split of the
+    load rate; each segment starts on the load's truck until reassigned. */
+export function buildSegments(l: Load, cuts: number[]): LoadSegment[] {
+  const sorted = l.stops.slice().sort((a, b) => a.sequence - b.sequence);
+  const bounds = [0, ...cuts.filter((c) => c > 0 && c < sorted.length - 1).sort((a, b) => a - b), sorted.length - 1];
+  const segs: LoadSegment[] = [];
+  for (let i = 0; i < bounds.length - 1; i++) {
+    segs.push({
+      id: `seg-${Date.now()}-${i}`,
+      label: `Segment ${i + 1}`,
+      fromStop: bounds[i], toStop: bounds[i + 1],
+      assignedTruck: l.assignedTruck, assignedTeamId: l.assignedTeamId, driverIds: [],
+      status: l.status,
+      segmentRevenue: null, segmentMiles: null, segmentCpm: null,
+    });
+  }
+  return segs;
+}
+
+/** default the per-segment revenue to a miles-proportional split of the rate */
+export function proportionRevenue(l: Load): Load {
+  const total = l.segments.reduce((n, s) => n + (s.segmentMiles ?? 0), 0);
+  if (!l.rate || !total) return l;
   const segments = l.segments.map((s) => ({
     ...s,
-    segmentCpm: s.segmentMiles && s.segmentRevenue ? Math.round((s.segmentRevenue / s.segmentMiles) * 100) / 100 : s.segmentCpm,
+    segmentRevenue: s.segmentRevenue ?? Math.round((l.rate! * ((s.segmentMiles ?? 0) / total)) * 100) / 100,
   }));
-  return { ...l, laneMiles: miles, cpm, segments };
+  return { ...l, segments };
+}
+
+export interface LoadTotals { revenue: number; miles: number; blendedCpm: number | null; segments: number; trucks: number }
+export function loadTotals(l: Load): LoadTotals {
+  if (l.segments.length === 0) {
+    return { revenue: l.rate ?? 0, miles: l.laneMiles ?? 0, blendedCpm: l.cpm, segments: 0, trucks: 1 };
+  }
+  const revenue = l.segments.reduce((n, s) => n + (s.segmentRevenue ?? 0), 0);
+  const miles = l.segments.reduce((n, s) => n + (s.segmentMiles ?? 0), 0);
+  return {
+    revenue, miles,
+    blendedCpm: miles ? Math.round((revenue / miles) * 100) / 100 : null,
+    segments: l.segments.length,
+    trucks: new Set(l.segments.map((s) => s.assignedTruck).filter(Boolean)).size,
+  };
+}
+
+/** shuttle/handoff city label between segment i and i+1 (the shared stop) */
+export function handoffLabel(l: Load, i: number): string {
+  const sorted = l.stops.slice().sort((a, b) => a.sequence - b.sequence);
+  const s = sorted[l.segments[i]?.toStop ?? -1];
+  return s ? [s.city, s.state].filter(Boolean).join(', ') || s.address || 'shuttle point' : 'shuttle point';
+}
+
+/** write a board cell for every segment truck (route label carries the segment
+    tag) and clear cells for trucks that were dropped by a re-split */
+export async function syncSegmentAssignments(l: Load, prevTrucks: string[]) {
+  const now = l.segments.length
+    ? l.segments.map((s, i) => ({ truck: s.assignedTruck, label: `${l.routeName} ⇄ ${s.label}/${l.segments.length} (${i < l.segments.length - 1 ? '→ ' + handoffLabel(l, i) : 'final'})`, status: s.status }))
+    : [{ truck: l.assignedTruck, label: l.routeName, status: l.status }];
+  const keep = new Set(now.map((x) => x.truck));
+  for (const t of prevTrucks) if (t && !keep.has(t)) await setAssignment(t, l.date, null);
+  for (const x of now) if (x.truck) await setAssignment(x.truck, l.date, { route: x.label, status: x.status, usps: l.uspsContract });
+}
+
+/** all trucks a load currently occupies on the board */
+export function loadTrucks(l: Load): string[] {
+  return l.segments.length ? l.segments.map((s) => s.assignedTruck).filter(Boolean) : [l.assignedTruck].filter(Boolean);
+}
+
+/* ---- financial attribution (per truck/team; per segment for splits) ------ */
+export interface AttributionRow {
+  loadId: string; date: string; routeName: string; laneKey: string;
+  customer: string; truck: string; teamId: string;
+  revenue: number; miles: number; segmentLabel: string;
+}
+export function attributionRows(loads: Load[]): AttributionRow[] {
+  const out: AttributionRow[] = [];
+  const laneOf = (r: string) => r.replace(/\s+⇄.*$/, '').trim() || '(unnamed)';
+  for (const l of loads) {
+    if (l.segments.length === 0) {
+      out.push({
+        loadId: l.id, date: l.date, routeName: l.routeName, laneKey: laneOf(l.routeName),
+        customer: l.customerName || '(no customer)', truck: l.assignedTruck, teamId: l.assignedTeamId,
+        revenue: l.rate ?? 0, miles: l.laneMiles ?? 0, segmentLabel: '',
+      });
+    } else {
+      for (const s of l.segments) {
+        out.push({
+          loadId: l.id, date: l.date, routeName: l.routeName, laneKey: laneOf(l.routeName),
+          customer: l.customerName || '(no customer)', truck: s.assignedTruck, teamId: s.assignedTeamId,
+          revenue: s.segmentRevenue ?? 0, miles: s.segmentMiles ?? 0, segmentLabel: s.label,
+        });
+      }
+    }
+  }
+  return out;
 }
 
 /* ---- dispatch readiness (the "shell" rule: only these block dispatch) ---- */
