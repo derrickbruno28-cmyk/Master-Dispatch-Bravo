@@ -1,15 +1,30 @@
 # dependencies / build output
 node_modules/
 dist/
+app/dist/
 *.log
 
+# single-file build output
+dist-single/
+
 # local env (Firebase web config — recreate via `firebase apps:sdkconfig`)
+.env
 .env.local
 .env.*.local
+app/.env.local
+app/.env.development.local
+
+# firebase cache
+.firebase/
+firebase-debug.log
+functions/lib/
+
+# functions params are NOT secret (secrets live in Secret Manager) — keep in git
+!functions/.env
 
 # OS noise
 .DS_Store
 Thumbs.db
 
-# single-file build output
-dist-single/
+# separate project parked in this folder — never commit
+Master Dispatch - DB/
