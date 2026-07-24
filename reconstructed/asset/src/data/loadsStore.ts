@@ -14,6 +14,7 @@ import { collection, doc, setDoc, deleteDoc, onSnapshot } from 'firebase/firesto
 import { emitChange } from './bus';
 import { cellKey, setAssignment } from './schedule';
 import { routingProvider, type RoutePoint } from '../integrations/routing';
+import { rememberStops } from './addressStore';
 
 export interface LoadStop {
   type: 'pickup' | 'delivery';
@@ -147,6 +148,7 @@ export async function saveLoad(l: Load): Promise<Load> {
   const withMiles = await recalcMiles(l);
   cache = { ...cache, [withMiles.id]: withMiles };
   if (firebaseEnabled && db) persistDoc(withMiles); else writeLocal();
+  rememberStops(withMiles.stops);   // address book: remember stops for auto-fill next time
   emitChange();
   return withMiles;
 }

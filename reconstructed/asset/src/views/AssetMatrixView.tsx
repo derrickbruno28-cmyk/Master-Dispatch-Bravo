@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { TERMINALS, TERMINAL_LABELS } from '../data/fleet';
-import { loadFleet, saveTruck, teamStatusMeta, isShutdown, blankTruck, TRUCK_TYPES, type FleetTruck } from '../data/fleetStore';
+import { loadFleet, saveTruck, removeTruck, teamStatusMeta, isShutdown, blankTruck, TRUCK_TYPES, type FleetTruck } from '../data/fleetStore';
 import { loadDrivers, driverNames } from '../data/driversStore';
 import { onChange } from '../data/bus';
 import {
@@ -359,6 +359,7 @@ function TerminalRows({ term, trucks, dates, assign, setEditing, openDispatch, l
 }) {
   const teams = trucks.filter((t) => (t.driver2 || '').trim());
   const solos = trucks.filter((t) => !(t.driver2 || '').trim());
+  const [confirmRemove, setConfirmRemove] = useState<string | null>(null);
 
   function renderTruck(t: FleetTruck) {
         const outOfService = oos.has(t.tractor);
@@ -381,7 +382,15 @@ function TerminalRows({ term, trucks, dates, assign, setEditing, openDispatch, l
         return (
         <tr key={t.tractor} className={rowCls}>
           <td className="am-truckcol">
-            <div className="am-tractor">#{t.tractor} <span className="am-rating">{t.rating}</span></div>
+            <div className="am-tractor">#{t.tractor} <span className="am-rating">{t.rating}</span>
+              {confirmRemove === t.tractor
+                ? <span className="am-teamremove-c"><span className="am-muted">Remove team?</span>
+                    <button className="fleet-del" title="Remove team" onClick={() => { removeTruck(t.tractor); setConfirmRemove(null); }}>✓</button>
+                    <button className="am-clear" title="Keep" onClick={() => setConfirmRemove(null)}>✕</button></span>
+                : canDel
+                  ? <button className="am-teamremove" title="Remove this team from the board (not running / not utilized)" onClick={() => setConfirmRemove(t.tractor)}>✕</button>
+                  : null}
+            </div>
             {outOfService && <div className="am-oosbadge" title="Blocked from assignment — clear on the Out of Service page">🛠 OUT OF SERVICE · Fleetio</div>}
             <div className="am-drivers-confirm">
               {t.driver1 && <label className={`am-driverchk ${nameCls(!!t.confirm1)}`}><input type="checkbox" checked={!!t.confirm1} onChange={(e) => saveTruck({ ...t, confirm1: e.target.checked })} />{t.driver1}</label>}

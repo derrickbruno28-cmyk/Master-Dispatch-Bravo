@@ -9,6 +9,7 @@ import {
 import { loadCustomers, ensureCustomer, EQUIPMENT_TYPES } from '../data/customersStore';
 import { loadFleet, saveTruck } from '../data/fleetStore';
 import { loadTrailers } from '../data/trailersStore';
+import { listAddresses } from '../data/addressStore';
 import { documentStore, type LoadDocument } from '../integrations/documents';
 import { routingProvider } from '../integrations/routing';
 import { rateConParser, applyRateCon } from '../integrations/ratecon';
@@ -152,9 +153,14 @@ export default function LoadDetailModal({ tractor, date, assignment, canDel, ini
               if (saved.segments.length > 0) {
                 await syncSegmentAssignments(saved, prevTrucks.current);
                 prevTrucks.current = loadTrucks(saved);
+                if (onCreated) onCreated(saved);
                 onClose();
                 return;
               }
+              /* a freshly-created load dispatches through onCreated (places it on
+                 the board); an existing cell dispatches through onSave. Without
+                 this, dispatching a NEW load hit the no-op onSave and did nothing. */
+              if (onCreated) { onCreated(saved); return; }
               onSave({ route: saved.routeName, status: 'dispatched', usps: saved.uspsContract });
             }} />
         )}
@@ -201,7 +207,7 @@ function InfoTab({ l, f, canDel, assignable, autoFilled, onRateCon, onNotice, on
         </div>
         {assignable && (
           <div className="load-assign-box">
-            <div className="load-assign-title">Assignment <span className="am-muted">— start the schedule entry: type a truck # (any number — it doesn't have to be a set-up team) and the board date. Assign the trailer below. You can save with no route and fill the rest in later.</span></div>
+            <div className="load-assign-title">Assignment <span className="am-muted">— start the schedule entry: type a truck # (any number — it doesn't have to be a set-up team) and the route date. Assign the trailer below. You can save with no route and fill the rest in later.</span></div>
             <div className="load-two">
               <L t="Truck #">
                 <input className="am-input" list="load-trucks" value={l.assignedTruck}
@@ -209,7 +215,7 @@ function InfoTab({ l, f, canDel, assignable, autoFilled, onRateCon, onNotice, on
                   placeholder="type a truck # (or leave blank to place later)" />
                 <datalist id="load-trucks">{fleet.map((t) => <option key={t.tractor} value={t.tractor}>{[t.driver1, t.driver2].filter(Boolean).join(' / ') || t.type}</option>)}</datalist>
               </L>
-              <L t="Board date (pickup day)"><input className="am-input" type="date" value={l.date} onChange={(e) => f('date', e.target.value)} /></L>
+              <L t="Route date (pickup day)"><input className="am-input" type="date" value={l.date} onChange={(e) => f('date', e.target.value)} /></L>
             </div>
           </div>
         )}
@@ -298,6 +304,14 @@ function StopsTab({ l, setL, persist }: { l: Load; setL: React.Dispatch<React.Se
   const canSplit = sorted.length >= 3;
   const cuts = l.segments.slice(0, -1).map((s) => s.toStop);
   const fleet = useMemo(() => loadFleet(), []);
+  const addrBook = useMemo(() => listAddresses(), []);
+  /* pick a remembered street address → auto-fill the city/state/zip too */
+  function setAddress(i: number, v: string) {
+    const m = addrBook.find((a) => a.address.toLowerCase() === v.trim().toLowerCase());
+    setL((p) => ({ ...p, stops: p.stops.map((s, j) => (j === i
+      ? { ...s, address: v, ...(m ? { city: s.city || m.city, state: s.state || m.state, zip: s.zip || m.zip } : {}) }
+      : s)) }));
+  }
 
   /* live distance between each consecutive stop (haversine estimate) */
   const [legMiles, setLegMiles] = useState<(number | null)[]>([]);
@@ -345,7 +359,7 @@ function StopsTab({ l, setL, persist }: { l: Load; setL: React.Dispatch<React.Se
             <button className="fleet-del" onClick={() => del(i)}>🗑</button>
           </div>
           <div className="load-two">
-            <input className="am-input" placeholder="Address" value={s.address} onChange={(e) => upd(i, 'address', e.target.value)} />
+            <input className="am-input" placeholder="Address" list="load-addresses" value={s.address} onChange={(e) => setAddress(i, e.target.value)} />
             <input className="am-input" placeholder="Date & time" type="datetime-local" value={s.dateTime} onChange={(e) => upd(i, 'dateTime', e.target.value)} />
           </div>
           <div className="load-three">
@@ -363,6 +377,7 @@ function StopsTab({ l, setL, persist }: { l: Load; setL: React.Dispatch<React.Se
             : null; })()}
         </div>
       ))}
+      <datalist id="load-addresses">{addrBook.map((a, i) => <option key={i} value={a.address}>{[a.city, a.state].filter(Boolean).join(', ')}</option>)}</datalist>
       <div className="load-stopadd">
         <button className="am-save" onClick={() => add('pickup')}>＋ Pickup</button>
         <button className="am-save" style={{ background: '#7c5cff', color: '#fff' }} onClick={() => add('delivery')}>＋ Delivery</button>
@@ -553,8 +568,8 @@ function DispatchTab({ l, missing, flash, onDispatched }: {
           <button className="am-save" onClick={copyImage}>📋 Copy image</button>
           <button className="am-clear" onClick={downloadPdf}>⭳ Download PDF</button>
           <button className="load-dispatch-btn" disabled={missing.length > 0}
-            title={missing.length ? 'Fill the required fields first' : 'Set load to Dispatched + mark flyer sent'}
-            onClick={() => onDispatched(sendTo)}>✓ Mark Dispatched & flyer sent</button>
+            title={missing.length ? 'Fill the required fields first' : 'Set the load to Dispatched + mark the load info sent to the driver/team'}
+            onClick={() => { flash('✓ Marked Dispatched — load info sent to the driver/team.'); onDispatched(sendTo); }}>✓ Mark Dispatched &amp; Load Info Sent</button>
         </div>
       </div>
 

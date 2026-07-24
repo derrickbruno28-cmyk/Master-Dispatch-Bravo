@@ -544,6 +544,18 @@
 .drv-conf-chip.pending { color: #4a3808; background: #ecc94b; }
 .drv-conf-chip.confirmed { color: #12401f; background: #68d391; }
 
+/* ---- remove-a-team control on the matrix truck column ---- */
+.am-teamremove { border: none; background: transparent; color: var(--muted); cursor: pointer; font-size: 10px; padding: 0 3px; margin-left: 4px; opacity: 0.55; border-radius: 4px; }
+.am-teamremove:hover { opacity: 1; color: var(--red); background: rgba(245,80,90,0.12); }
+.am-teamremove-c { display: inline-flex; align-items: center; gap: 4px; margin-left: 6px; font-size: 10px; }
+
+/* ---- Load Repository table ---- */
+.repo-table th, .repo-table td { font-size: 11.5px; vertical-align: top; }
+.repo-lane { font-size: 12px; }
+.repo-via { font-size: 10.5px; }
+.repo-triplabel { font-size: 10px; color: var(--muted); font-weight: 600; }
+.repo-del { max-width: 220px; white-space: normal; }
+
 /* ---- Assigned — NTD (has a route, not dispatched) light-blue row chip ---- */
 .am-ntd { color: #0b6aa2 !important; background: rgba(56,189,248,0.16) !important; border: 1px solid #7cc4f0; }
 :root[data-theme="dark"] .am-ntd, .am-ntd { }

@@ -8,6 +8,7 @@ import CoveredView from './views/CoveredView';
 import FleetStatusView from './views/FleetStatusView';
 import FleetMapView from './views/FleetMapView';
 import OutOfServiceView from './views/OutOfServiceView';
+import LoadRepositoryView from './views/LoadRepositoryView';
 import TrucksView from './views/TrucksView';
 import TrailersView from './views/TrailersView';
 import LoadsView from './views/LoadsView';
@@ -28,9 +29,9 @@ import { watchForUpdate } from './data/versionCheck';
    kept minimal, and driver / team / route look-ups are separate filters below
    the header (not one catch-all search box). */
 
-const APP_VERSION = '0.17.0';
+const APP_VERSION = '0.18.0';
 
-type Tab = 'matrix' | 'optimizer' | 'otp' | 'covered' | 'fleet' | 'fleet-map' | 'fleet-oos'
+type Tab = 'matrix' | 'optimizer' | 'otp' | 'covered' | 'repo' | 'fleet' | 'fleet-map' | 'fleet-oos'
   | 'trucks' | 'trailers' | 'loads' | 'drivers' | 'roles'
   | 'fin-cpm' | 'fin-customer' | 'fin-truck' | 'fin-miles' | 'integrations';
 
@@ -41,6 +42,7 @@ const NAV_GROUPS: { title: string; items: NavItem[] }[] = [
     { key: 'optimizer', label: '⚡ Route Optimizer' },
     { key: 'otp', label: '📊 OTP / OTD' },
     { key: 'covered', label: '✅ Routes Covered' },
+    { key: 'repo', label: '📚 Load Repository' },
   ] },
   { title: 'People', items: [
     { key: 'drivers', label: '👤 Driver Availability' },
@@ -241,6 +243,7 @@ export default function App() {
           {tab === 'optimizer' && <RouteOptimizerView />}
           {tab === 'otp' && <OTPView />}
           {tab === 'covered' && <CoveredView />}
+          {tab === 'repo' && <LoadRepositoryView />}
           {tab === 'fleet' && <FleetStatusView seed={seedFleet} />}
           {tab === 'trucks' && <TrucksView />}
           {tab === 'trailers' && <TrailersView />}
