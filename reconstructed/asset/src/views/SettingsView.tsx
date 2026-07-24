@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { samsaraKey, setSamsaraKey, maskedKey, samsaraStatus, samsara, type ConnStatus } from '../integrations/samsara';
 import { fleetioClient } from '../integrations/telematics';
+import { maptilerKey, setMaptilerKey, maptilerMasked } from '../integrations/mapstyle';
 import { onChange, emitChange } from '../data/bus';
 
 /* Integrations — the connection panel for external telematics. Samsara is the
@@ -21,9 +22,13 @@ export default function SettingsView() {
 
   const [draft, setDraft] = useState('');
   const [saved, setSaved] = useState('');
+  const [mtDraft, setMtDraft] = useState('');
   const status = samsaraStatus();
   const meta = STATUS_META[status];
   const flt = fleetioClient();
+
+  function saveMt() { setMaptilerKey(mtDraft); setMtDraft(''); emitChange(); }
+  function clearMt() { setMaptilerKey(''); setMtDraft(''); emitChange(); }
 
   function save() {
     setSamsaraKey(draft);
@@ -77,6 +82,30 @@ export default function SettingsView() {
           <IntgFeature icon="⬛" title="Geofence Import" desc="Pull yard & customer geofences in from Samsara onto the Fleet Map." />
         </div>
         <div className="intg-mock-note">All three run on <b>mock data</b> today via one shared Samsara adapter — the real feed swaps in behind the same interface.</div>
+      </div>
+
+      {/* Map imagery (optional) — enables satellite/hybrid/terrain on the Fleet Map */}
+      <div className="intg-card">
+        <div className="intg-card-head">
+          <div className="intg-card-title">
+            <span className="intg-status-dot" style={{ background: maptilerKey() ? 'var(--green)' : 'var(--muted)' }} />
+            🛰 Map imagery <span className="intg-card-sub">{maptilerKey() ? 'satellite enabled' : 'optional — streets active'}</span>
+          </div>
+        </div>
+        <p className="am-muted" style={{ fontSize: 12 }}>The Fleet Map runs on a free street basemap with no key. Add a free MapTiler key to unlock <b>satellite / hybrid / terrain</b> (the full Samsara look).</p>
+        <div className="intg-key-row">
+          <div className="otp-field" style={{ flex: 1, minWidth: 260 }}>
+            <span className="otp-field-label">MapTiler key</span>
+            {maptilerKey()
+              ? <div className="intg-saved-key">🔑 {maptilerMasked()} <button type="button" className="am-clear" onClick={clearMt}>Remove</button></div>
+              : (
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <input className="am-input" type="password" placeholder="paste a MapTiler key (free tier)…" value={mtDraft} onChange={(e) => setMtDraft(e.target.value)} autoComplete="off" />
+                  <button type="button" className="am-save" disabled={!mtDraft.trim()} onClick={saveMt}>Save key</button>
+                </div>
+              )}
+          </div>
+        </div>
       </div>
 
       {/* Fleetio (already wired as a mock in Phase 3) */}

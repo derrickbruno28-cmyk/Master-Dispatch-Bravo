@@ -92,12 +92,19 @@ class MockSamsara implements SamsaraService {
     });
   }
   async positions(): Promise<TruckGps[]> {
+    const now = Date.now() / 1000;
     return loadFleet().map((t, i) => {
       const c = CITY_COORDS[(t.currentCity || t.homeCity || '').toUpperCase()] ?? CITY_COORDS['DALLAS'];
+      const moving = /en route|delivering|transit/.test((t.status || '').toLowerCase());
+      /* until real GPS is wired, en-route trucks drift on a slow loop so you can
+         see the markers move; parked trucks sit still (source stays 'mock') */
+      const driftLng = moving ? Math.sin(now / 9 + i) * 0.6 : 0;
+      const driftLat = moving ? Math.cos(now / 11 + i) * 0.3 : 0;
       return {
         truck: t.tractor,
-        lat: c.lat + ((i % 7) - 3) * 0.05, lng: c.lng + ((i % 5) - 2) * 0.05,
-        speedMph: /en route|delivering/.test((t.status || '').toLowerCase()) ? 58 + (i % 8) : 0,
+        lat: c.lat + ((i % 7) - 3) * 0.05 + driftLat,
+        lng: c.lng + ((i % 5) - 2) * 0.05 + driftLng,
+        speedMph: moving ? 58 + (i % 8) : 0,
         heading: ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'][i % 8],
         updatedAt: new Date().toISOString(), source: 'mock',
       };
