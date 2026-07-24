@@ -10,6 +10,7 @@ import { loadCustomers, ensureCustomer, LOAD_TYPES, EQUIPMENT_TYPES } from '../d
 import { loadFleet, saveTruck } from '../data/fleetStore';
 import { documentStore, type LoadDocument } from '../integrations/documents';
 import { routingProvider } from '../integrations/routing';
+import { rateConParser, applyRateCon } from '../integrations/ratecon';
 import type { Assignment } from '../data/schedule';
 
 /* Load Detail modal — replaces the old 3-field inline cell editor. Tabbed shell
@@ -33,10 +34,29 @@ export default function LoadDetailModal({ tractor, date, assignment, canDel, ini
   });
   const [tab, setTab] = useState<Tab>(initialTab ?? 'info');
   const [notice, setNotice] = useState('');
+  const [autoFilled, setAutoFilled] = useState<Set<string>>(new Set());
+  const [verify, setVerify] = useState<{ filled: string[]; confidence: string } | null>(null);
   const prevTrucks = useRef<string[]>(loadTrucks(l));
   const f = <K extends keyof Load>(k: K, v: Load[K]) => setL((p) => ({ ...p, [k]: v }));
 
   const missing = missingForDispatch(l);
+
+  /* rate-con drop → parse → apply as a highlighted, must-verify suggestion */
+  async function onRateCon(file: File) {
+    setNotice('⏳ Reading the rate con…');
+    try {
+      const res = await rateConParser().parse(file);
+      if (res.keys.length === 0) { setNotice('No fields recognized in that PDF — fill the load in manually.'); return; }
+      const { load, changed } = applyRateCon(l, res.fields);
+      setL(load);
+      setAutoFilled(new Set(changed));
+      setVerify({ filled: res.filled, confidence: res.confidence });
+      setNotice('');
+      setTab('info');
+    } catch {
+      setNotice('Could not read that file — is it a PDF rate con? You can still fill the load in manually.');
+    }
+  }
 
   async function persist(next?: Partial<Load>): Promise<Load> {
     let out = { ...l, ...next };
@@ -46,6 +66,7 @@ export default function LoadDetailModal({ tractor, date, assignment, canDel, ini
     return saved;
   }
   async function saveAndClose() {
+    if (verify) { setNotice('⚠ Verify the auto-filled fields, then click “✓ Verified” before saving.'); setTab('info'); return; }
     if (!l.routeName.trim()) { setNotice('Route name is required to place the load on the board.'); setTab('info'); return; }
     const saved = await persist();
     if (saved.segments.length > 0) {
@@ -89,8 +110,22 @@ export default function LoadDetailModal({ tractor, date, assignment, canDel, ini
 
         {warning && <div className="am-dblbook" style={{ marginBottom: 6 }}>{warning}</div>}
         {notice && <div className="am-notice">{notice}</div>}
+        {verify && (
+          <div className="ratecon-verify">
+            <div className="ratecon-verify-head">
+              📄 Auto-filled from rate con <span className={`ratecon-conf ${verify.confidence}`}>{verify.confidence} confidence</span>
+            </div>
+            <div className="ratecon-verify-body">
+              Review the highlighted fields — {verify.filled.join(' · ')}. Nothing saves until you confirm.
+            </div>
+            <div className="ratecon-verify-actions">
+              <button className="am-save" onClick={() => { setVerify(null); setAutoFilled(new Set()); }}>✓ Verified — looks right</button>
+              <button className="am-clear" onClick={() => { setVerify(null); setAutoFilled(new Set()); }}>Dismiss</button>
+            </div>
+          </div>
+        )}
 
-        {tab === 'info' && <InfoTab l={l} f={f} canDel={canDel} onClear={() => { clearLoadCell(tractor, date); onClear(); }} />}
+        {tab === 'info' && <InfoTab l={l} f={f} canDel={canDel} autoFilled={autoFilled} onRateCon={onRateCon} onClear={() => { clearLoadCell(tractor, date); onClear(); }} />}
         {tab === 'stops' && <StopsTab l={l} setL={setL} />}
         {tab === 'customer' && <CustomerTab l={l} f={f} />}
         {tab === 'docs' && <DocsTab loadId={l.id} />}
@@ -125,35 +160,49 @@ function Sum({ label, val, money }: { label: string; val: string; money?: boolea
 }
 
 /* ---------------- Load Info ---------------- */
-function InfoTab({ l, f, canDel, onClear }: { l: Load; f: <K extends keyof Load>(k: K, v: Load[K]) => void; canDel: boolean; onClear: () => void }) {
+function InfoTab({ l, f, canDel, autoFilled, onRateCon, onClear }: {
+  l: Load; f: <K extends keyof Load>(k: K, v: Load[K]) => void; canDel: boolean;
+  autoFilled: Set<string>; onRateCon: (file: File) => void | Promise<void>; onClear: () => void;
+}) {
   const customers = useMemo(() => loadCustomers(), []);
   const [confirmClear, setConfirmClear] = useState(false);
+  const [drag, setDrag] = useState(false);
+  const hl = (k: string) => `am-input${autoFilled.has(k) ? ' load-autofilled' : ''}`;
   return (
     <div className="load-info-grid">
       <div className="load-fields">
-        <L t="Route name *"><input className="am-input" value={l.routeName} onChange={(e) => f('routeName', e.target.value)} placeholder="FA2D3-544 Irving→SATX" /></L>
+        <div className={`ratecon-drop ${drag ? 'on' : ''}`}
+          onDragOver={(e) => { e.preventDefault(); setDrag(true); }}
+          onDragLeave={() => setDrag(false)}
+          onDrop={(e) => { e.preventDefault(); setDrag(false); const fl = e.dataTransfer.files?.[0]; if (fl) void onRateCon(fl); }}>
+          <span>📄 Drop a <b>rate con PDF</b> here to auto-fill this load</span>
+          <label className="am-clear ratecon-browse">Browse…
+            <input type="file" accept="application/pdf,.pdf,.txt" style={{ display: 'none' }} onChange={(e) => { const fl = e.target.files?.[0]; if (fl) void onRateCon(fl); e.target.value = ''; }} />
+          </label>
+        </div>
+        <L t="Route name *"><input className={hl('routeName')} value={l.routeName} onChange={(e) => f('routeName', e.target.value)} placeholder="FA2D3-544 Irving→SATX" /></L>
         <div className="load-two">
           <L t="Customer *">
-            <input className="am-input" list="load-customers" value={l.customerName} onChange={(e) => f('customerName', e.target.value)} placeholder="pick or type…" />
+            <input className={hl('customerName')} list="load-customers" value={l.customerName} onChange={(e) => f('customerName', e.target.value)} placeholder="pick or type…" />
             <datalist id="load-customers">{customers.map((c) => <option key={c.id} value={c.name} />)}</datalist>
           </L>
           <L t="Load type *"><select className="am-input" value={l.loadType} onChange={(e) => f('loadType', e.target.value)}>{LOAD_TYPES.map((t) => <option key={t}>{t}</option>)}</select></L>
         </div>
         <div className="load-two">
-          <L t="Equipment (van type) *"><select className="am-input" value={l.equipment} onChange={(e) => f('equipment', e.target.value)}>
+          <L t="Equipment (van type) *"><select className={hl('equipment')} value={l.equipment} onChange={(e) => f('equipment', e.target.value)}>
             <option value="">— select —</option>{EQUIPMENT_TYPES.map((t) => <option key={t}>{t}</option>)}
           </select></L>
           <L t="Status"><select className="am-input" value={l.status} onChange={(e) => f('status', e.target.value)}>{STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}</select></L>
         </div>
         <div className="load-two">
-          <L t="Rate (revenue $)"><input className="am-input load-rate-input" type="number" value={l.rate ?? ''} onChange={(e) => f('rate', e.target.value === '' ? null : Number(e.target.value))} placeholder="0.00" /></L>
-          <L t="Weight"><input className="am-input" value={l.weight} onChange={(e) => f('weight', e.target.value)} placeholder="e.g. 24,000 lbs" /></L>
+          <L t="Rate (revenue $)"><input className={`${hl('rate')} load-rate-input`} type="number" value={l.rate ?? ''} onChange={(e) => f('rate', e.target.value === '' ? null : Number(e.target.value))} placeholder="0.00" /></L>
+          <L t="Weight"><input className={hl('weight')} value={l.weight} onChange={(e) => f('weight', e.target.value)} placeholder="e.g. 24,000 lbs" /></L>
         </div>
         <div className="load-two">
-          <L t="Reference / Conf #"><input className="am-input" value={l.referenceNo} onChange={(e) => f('referenceNo', e.target.value)} /></L>
+          <L t="Reference / Conf #"><input className={hl('referenceNo')} value={l.referenceNo} onChange={(e) => f('referenceNo', e.target.value)} /></L>
           <L t="Booking authority"><input className="am-input" value={l.bookingAuthority} onChange={(e) => f('bookingAuthority', e.target.value)} /></L>
         </div>
-        <L t="Commodity"><input className="am-input" value={l.commodity} onChange={(e) => f('commodity', e.target.value)} /></L>
+        <L t="Commodity"><input className={hl('commodity')} value={l.commodity} onChange={(e) => f('commodity', e.target.value)} /></L>
         <L t="Dispatch notes"><textarea className="am-input" rows={2} value={l.dispatchNotes} onChange={(e) => f('dispatchNotes', e.target.value)} /></L>
         <label className="am-usps-check"><input type="checkbox" checked={l.uspsContract} onChange={(e) => f('uspsContract', e.target.checked)} /> USPS contract route</label>
         <div className="load-clear-row">
@@ -166,15 +215,15 @@ function InfoTab({ l, f, canDel, onClear }: { l: Load; f: <K extends keyof Load>
               : <button className="am-clear" disabled title="Deleting is restricted to FMT Lead / US Ops / Owner">🔒 Clear (restricted)</button>}
         </div>
       </div>
-      <StopsPanel l={l} />
+      <StopsPanel l={l} highlight={autoFilled.has('stops')} />
     </div>
   );
 }
 
-function StopsPanel({ l }: { l: Load }) {
+function StopsPanel({ l, highlight }: { l: Load; highlight?: boolean }) {
   const sorted = l.stops.slice().sort((a, b) => a.sequence - b.sequence);
   return (
-    <div className="load-stops-panel">
+    <div className={`load-stops-panel${highlight ? ' load-autofilled' : ''}`}>
       <div className="load-dist-banner">🛣 Lane distance: <b>{fmtMiles(l.laneMiles)}</b> <span className="am-muted">· {routingProvider().label}</span></div>
       {sorted.map((s, i) => (
         <div key={i} className={`load-stopcard ${s.type}`}>

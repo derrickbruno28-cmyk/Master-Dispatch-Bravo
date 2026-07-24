@@ -449,3 +449,63 @@
 .asset-dropdown-item { display: block; width: 100%; text-align: left; border: none; background: transparent; color: var(--text); font: inherit; font-size: 12.5px; font-weight: 600; padding: 7px 10px; border-radius: 7px; cursor: pointer; }
 .asset-dropdown-item:hover { background: var(--panel-2, rgba(127,127,127,0.12)); }
 .asset-dropdown-item.on { color: var(--accent); }
+
+/* ============ Phase 3 — Fleet Map · Out-of-Service · Rate-con auto-fill ============ */
+
+/* rate-con drop + auto-fill highlight + verify banner */
+.ratecon-drop { display: flex; align-items: center; justify-content: space-between; gap: 10px; border: 1.5px dashed var(--border); border-radius: 10px; padding: 10px 14px; margin-bottom: 12px; font-size: 12.5px; color: var(--muted); background: var(--panel-2); }
+.ratecon-drop.on { border-color: var(--accent); color: var(--accent); background: rgba(37,99,235,0.07); }
+.ratecon-browse { cursor: pointer; white-space: nowrap; }
+.load-autofilled { border-color: #d9a441 !important; background: rgba(217,164,65,0.12) !important; box-shadow: 0 0 0 2px rgba(217,164,65,0.18); }
+.load-stops-panel.load-autofilled { border-radius: 10px; padding: 8px; }
+.ratecon-verify { margin: 6px 0 4px; border: 1px solid #d9a441; background: rgba(217,164,65,0.12); border-radius: 10px; padding: 9px 12px; }
+.ratecon-verify-head { font-weight: 800; font-size: 13px; color: #b9822a; display: flex; align-items: center; gap: 8px; }
+.ratecon-conf { font-size: 9.5px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.4px; padding: 1px 6px; border-radius: 4px; color: #fff; }
+.ratecon-conf.high { background: var(--green); } .ratecon-conf.medium { background: #d9a441; } .ratecon-conf.low { background: var(--muted); }
+.ratecon-verify-body { font-size: 12px; color: var(--text); margin: 3px 0 7px; }
+.ratecon-verify-actions { display: flex; gap: 8px; }
+
+/* Fleetio out-of-service row lock on the matrix */
+.row-oos .am-truckcol { background: rgba(245,80,90,0.1) !important; }
+.row-oos .am-tractor { color: var(--red); }
+.am-oosbadge { margin-top: 4px; font-size: 9px; font-weight: 800; color: #fff; background: var(--red); border-radius: 4px; padding: 2px 6px; letter-spacing: 0.3px; display: inline-block; }
+.am-cell-oos { cursor: not-allowed; background-image: repeating-linear-gradient(45deg, rgba(245,80,90,0.09) 0, rgba(245,80,90,0.09) 8px, transparent 8px, transparent 16px); }
+.am-cell-oos .am-add { opacity: 0.25; }
+
+/* Out-of-Service page tags */
+.oos-tag { font-size: 10.5px; font-weight: 800; color: #fff; background: var(--red); border-radius: 5px; padding: 2px 8px; letter-spacing: 0.3px; }
+.oos-ok { font-size: 11.5px; color: var(--green); font-weight: 700; }
+
+/* integration "connected" badges */
+.intg-badge { font-size: 11px; font-weight: 700; color: var(--muted); background: var(--panel-2); border: 1px solid var(--border); border-radius: 999px; padding: 3px 10px; }
+.intg-badge.on { color: var(--green); border-color: rgba(34,197,94,0.4); background: rgba(34,197,94,0.08); }
+
+/* Fleet Map */
+.fleetmap-badges { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.fleetmap-legend { display: flex; gap: 14px; flex-wrap: wrap; margin: 8px 0 10px; font-size: 11.5px; color: var(--muted); }
+.fleetmap-legend-item { display: flex; align-items: center; gap: 5px; }
+.fleetmap-legend-item b { color: var(--text); }
+.fleetmap-dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+.fleetmap-grid { display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 14px; align-items: start; }
+@media (max-width: 900px) { .fleetmap-grid { grid-template-columns: 1fr; } }
+.fleetmap-mapwrap { background: var(--panel); border: 1px solid var(--border); border-radius: 14px; padding: 8px; }
+.fleetmap-svg { width: 100%; height: auto; display: block; }
+.fleetmap-bg { fill: var(--panel-2); }
+.fleetmap-grid-line { stroke: var(--border); stroke-width: 1; opacity: 0.5; }
+.fleetmap-refdot { fill: var(--muted); opacity: 0.55; }
+.fleetmap-reflabel { fill: var(--muted); font-size: 10px; opacity: 0.7; }
+.fleetmap-pin { stroke: #fff; stroke-width: 1.5; transition: r 0.1s; }
+.fleetmap-pin.active { stroke-width: 2; }
+.fleetmap-pinlabel { fill: #fff; font-size: 7px; font-weight: 800; pointer-events: none; }
+.fleetmap-pintip { fill: var(--text); font-size: 10px; font-weight: 700; paint-order: stroke; stroke: var(--panel); stroke-width: 3px; }
+.fleetmap-list { background: var(--panel); border: 1px solid var(--border); border-radius: 14px; padding: 8px; max-height: 620px; overflow-y: auto; }
+.fleetmap-list-head { font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.4px; color: var(--muted); padding: 4px 6px 8px; }
+.fleetmap-row { display: flex; align-items: center; gap: 8px; padding: 6px; border-radius: 8px; cursor: pointer; }
+.fleetmap-row:hover, .fleetmap-row.on { background: var(--panel-2); }
+.fleetmap-row-dot { width: 9px; height: 9px; border-radius: 50%; flex: none; }
+.fleetmap-row-main { flex: 1; min-width: 0; }
+.fleetmap-row-top { font-size: 12.5px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fleetmap-row-sub { font-size: 10.5px; color: var(--muted); }
+.fleetmap-src { font-size: 9px; font-weight: 700; color: var(--muted); background: var(--panel-2); border: 1px solid var(--border); border-radius: 5px; padding: 1px 5px; white-space: nowrap; }
+.fleetmap-src.live { color: var(--green); border-color: rgba(34,197,94,0.4); }
+.fleetmap-list-note { font-size: 10.5px; color: var(--muted); padding: 8px 6px 4px; line-height: 1.4; }

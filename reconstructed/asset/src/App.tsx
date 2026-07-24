@@ -6,6 +6,8 @@ import RouteOptimizerView from './views/RouteOptimizerView';
 import OTPView from './views/OTPView';
 import CoveredView from './views/CoveredView';
 import FleetStatusView from './views/FleetStatusView';
+import FleetMapView from './views/FleetMapView';
+import OutOfServiceView from './views/OutOfServiceView';
 import DriversView from './views/DriversView';
 import RolesView from './views/RolesView';
 import FinancialsView, { type FinPage } from './views/FinancialsView';
@@ -21,19 +23,25 @@ import { onChange } from './data/bus';
    asset schedule into his live Bravo Matrix on his own system. This app is the
    single source for OUR asset data. */
 
-const APP_VERSION = '0.5.0';
+const APP_VERSION = '0.6.0';
 
-type Tab = 'matrix' | 'optimizer' | 'otp' | 'covered' | 'fleet' | 'drivers' | 'roles'
+type Tab = 'matrix' | 'optimizer' | 'otp' | 'covered' | 'fleet' | 'fleet-map' | 'fleet-oos' | 'drivers' | 'roles'
   | 'fin-cpm' | 'fin-customer' | 'fin-truck' | 'fin-miles';
 const TABS: { key: Tab; label: string; managerOnly?: boolean }[] = [
   { key: 'matrix', label: '🗓 Asset Matrix' },
   { key: 'optimizer', label: '⚡ Route Optimizer' },
   { key: 'otp', label: '📊 OTP / OTD' },
   { key: 'covered', label: '✅ Routes Covered' },
-  { key: 'fleet', label: '🚛 Fleet Status' },
   { key: 'drivers', label: '👤 Drivers' },
   { key: 'roles', label: '🔑 Roles', managerOnly: true },
 ];
+/* Fleet ▾ — Trucks/Fleet Status · Fleet Map (live GPS) · Out-of-Service (Fleetio) */
+const FLEET_ITEMS: { key: Tab; label: string }[] = [
+  { key: 'fleet', label: '🚛 Fleet Status' },
+  { key: 'fleet-map', label: '🗺 Fleet Map (live GPS)' },
+  { key: 'fleet-oos', label: '🛠 Out of Service' },
+];
+const isFleetTab = (t: Tab) => FLEET_ITEMS.some((f) => f.key === t);
 /* Financials ▾ — a dropdown, not full-width tabs (per the nav-restructure spec) */
 const FIN_ITEMS: { key: Tab; page: FinPage; label: string }[] = [
   { key: 'fin-cpm', page: 'cpm', label: 'Revenue / CPM' },
@@ -51,6 +59,7 @@ export default function App() {
   const [query, setQuery] = useState('');
   const [openResults, setOpenResults] = useState(false);
   const [finOpen, setFinOpen] = useState(false);
+  const [fleetOpen, setFleetOpen] = useState(false);
   const [seedDrivers, setSeedDrivers] = useState<{ q: string; nonce: number }>({ q: '', nonce: 0 });
   const [seedFleet, setSeedFleet] = useState<{ q: string; nonce: number }>({ q: '', nonce: 0 });
   const [, force] = useState(0);
@@ -162,6 +171,16 @@ export default function App() {
               {t.label}
             </button>
           ))}
+          <span className="asset-dropdown" onMouseLeave={() => setFleetOpen(false)}>
+            <button className={`asset-tab ${isFleetTab(tab) ? 'on' : ''}`} onClick={() => setFleetOpen((o) => !o)}>🚛 Fleet ▾</button>
+            {fleetOpen && (
+              <div className="asset-dropdown-menu">
+                {FLEET_ITEMS.map((f) => (
+                  <button key={f.key} className={`asset-dropdown-item ${tab === f.key ? 'on' : ''}`} onClick={() => { setTab(f.key); setFleetOpen(false); }}>{f.label}</button>
+                ))}
+              </div>
+            )}
+          </span>
           <span className="asset-dropdown" onMouseLeave={() => setFinOpen(false)}>
             <button className={`asset-tab ${finPageOf(tab) ? 'on' : ''}`} onClick={() => setFinOpen((o) => !o)}>💰 Financials ▾</button>
             {finOpen && (
@@ -185,6 +204,8 @@ export default function App() {
         {tab === 'otp' && <OTPView />}
         {tab === 'covered' && <CoveredView />}
         {tab === 'fleet' && <FleetStatusView seed={seedFleet} />}
+        {tab === 'fleet-map' && <FleetMapView />}
+        {tab === 'fleet-oos' && <OutOfServiceView />}
         {tab === 'drivers' && <DriversView seed={seedDrivers} />}
         {tab === 'roles' && showRoles && <RolesView />}
         {finPageOf(tab) && <FinancialsView page={finPageOf(tab)!} />}

@@ -11,6 +11,7 @@ import { canDelete } from '../data/permStore';
 import LoadDetailModal from './LoadDetailModal';
 import { loadAll, moveLoadCell, clearLoadCell, type Load } from '../data/loadsStore';
 import { documentStore } from '../integrations/documents';
+import { fleetioClient, localOosList } from '../integrations/telematics';
 
 /* Asset Matrix — the scheduling board for our OWN trucks.
    Rows = trucks grouped by home terminal (SA / Dallas / Memphis / Houston),
@@ -51,10 +52,20 @@ export default function AssetMatrixView() {
   const [notice, setNotice] = useState<string>('');
   const [canDel, setCanDel] = useState<boolean>(() => canDelete());
   const [fleet, setFleet] = useState<FleetTruck[]>(() => loadFleet());
+  const [oos, setOos] = useState<Set<string>>(new Set());
+
+  /* Fleetio out-of-service set (+ local dispatch overrides) → row lock */
+  function refreshOos() {
+    void fleetioClient().serviceStatuses().then((ss) =>
+      setOos(new Set([...localOosList(), ...ss.filter((s) => s.status === 'out_of_service').map((s) => s.truck)])));
+  }
 
   /* live sync: reload fleet + assignments whenever any store changes (e.g. a team
      is set NTB on the Fleet card) so the matrix stays congruent without a reload */
-  useEffect(() => onChange(() => { setFleet(loadFleet()); setAssign(loadAssignments()); setCanDel(canDelete()); }), []);
+  useEffect(() => {
+    refreshOos();
+    return onChange(() => { setFleet(loadFleet()); setAssign(loadAssignments()); setCanDel(canDelete()); refreshOos(); });
+  }, []);
 
   /* rich-load index (cell → Load) + 📎 doc counts for the chips */
   const loadsByCell = useMemo(() => {
@@ -209,6 +220,7 @@ export default function AssetMatrixView() {
                 setConfirmClear={setConfirmClear}
                 flash={flash}
                 canDel={canDel}
+                oos={oos}
               />
             ))}
           </tbody>
@@ -232,7 +244,7 @@ export default function AssetMatrixView() {
   );
 }
 
-function TerminalRows({ term, trucks, dates, assign, setEditing, openDispatch, loads, docCounts, save, move, confirmClear, setConfirmClear, flash, canDel }: {
+function TerminalRows({ term, trucks, dates, assign, setEditing, openDispatch, loads, docCounts, save, move, confirmClear, setConfirmClear, flash, canDel, oos }: {
   term: string; trucks: FleetTruck[]; dates: string[];
   assign: Record<string, Assignment>;
   setEditing: (k: string) => void; openDispatch: (k: string) => void;
@@ -240,17 +252,18 @@ function TerminalRows({ term, trucks, dates, assign, setEditing, openDispatch, l
   save: (k: string, a: Assignment) => void;
   move: (fromKey: string, toKey: string) => void;
   confirmClear: string | null; setConfirmClear: (k: string | null) => void;
-  flash: (msg: string) => void; canDel: boolean;
+  flash: (msg: string) => void; canDel: boolean; oos: Set<string>;
 }) {
   const teams = trucks.filter((t) => (t.driver2 || '').trim());
   const solos = trucks.filter((t) => !(t.driver2 || '').trim());
 
   function renderTruck(t: FleetTruck) {
-        const down = isShutdown(t.status);
+        const outOfService = oos.has(t.tractor);
+        const down = isShutdown(t.status) || outOfService;
         const meta = teamStatusMeta(t.status);
         const sLower = (t.status || '').trim().toLowerCase();
         const statusLabel = sLower === 'deadhead' && (t.deadheadTo || '').trim() ? `Deadhead → ${t.deadheadTo}` : meta.label;
-        const rowCls = down ? 'row-shutdown' : sLower === 'ntb' ? 'row-ntb' : sLower === 'deadhead' ? 'row-deadhead' : '';
+        const rowCls = outOfService ? 'row-oos' : down ? 'row-shutdown' : sLower === 'ntb' ? 'row-ntb' : sLower === 'deadhead' ? 'row-deadhead' : '';
         const hasFlyer = !!t.flyer;
         const nameCls = (confirmed: boolean) => confirmed ? 'am-driver-ok' : hasFlyer ? 'am-driver-flyer' : '';
         const drivers = [t.driver1, t.driver2].filter(Boolean);
@@ -260,6 +273,7 @@ function TerminalRows({ term, trucks, dates, assign, setEditing, openDispatch, l
         <tr key={t.tractor} className={rowCls}>
           <td className="am-truckcol">
             <div className="am-tractor">#{t.tractor} <span className="am-rating">{t.rating}</span></div>
+            {outOfService && <div className="am-oosbadge" title="Blocked from assignment — clear on the Out of Service page">🛠 OUT OF SERVICE · Fleetio</div>}
             <div className="am-drivers-confirm">
               {t.driver1 && <label className={`am-driverchk ${nameCls(!!t.confirm1)}`}><input type="checkbox" checked={!!t.confirm1} onChange={(e) => saveTruck({ ...t, confirm1: e.target.checked })} />{t.driver1}</label>}
               {t.driver2 && <label className={`am-driverchk ${nameCls(!!t.confirm2)}`}><input type="checkbox" checked={!!t.confirm2} onChange={(e) => saveTruck({ ...t, confirm2: e.target.checked })} />{t.driver2}</label>}
@@ -284,8 +298,12 @@ function TerminalRows({ term, trucks, dates, assign, setEditing, openDispatch, l
             return (
               <td
                 key={d}
-                className="am-cell"
-                onClick={() => { if (down) { flash(`Team #${t.tractor} is in SHUTDOWN — cannot assign a route.`); return; } setEditing(k); }}
+                className={`am-cell${outOfService ? ' am-cell-oos' : ''}`}
+                onClick={() => {
+                  if (outOfService) { flash(`Truck #${t.tractor} is OUT OF SERVICE (Fleetio) — clear it on the Out of Service page to assign.`); return; }
+                  if (down) { flash(`Team #${t.tractor} is in SHUTDOWN — cannot assign a route.`); return; }
+                  setEditing(k);
+                }}
                 onDragOver={(e) => { if (a === undefined && !down) e.preventDefault(); }}
                 onDrop={(e) => { if (down) return; const from = e.dataTransfer.getData('text/plain'); if (from) move(from, k); }}
               >
