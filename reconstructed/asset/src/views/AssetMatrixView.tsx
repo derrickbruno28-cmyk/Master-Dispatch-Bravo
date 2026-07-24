@@ -312,19 +312,17 @@ export default function AssetMatrixView() {
 function AddTeamModal({ onClose, onAdded }: { onClose: () => void; onAdded: (tractor: string) => void }) {
   const roster = useMemo(() => driverNames(), []);
   const [t, setT] = useState<FleetTruck>(() => blankTruck());
-  const [trailer, setTrailer] = useState('');
   const set = <K extends keyof FleetTruck>(k: K, v: FleetTruck[K]) => setT((p) => ({ ...p, [k]: v }));
   function add() {
     if (!t.tractor.trim()) return;
-    const notes = trailer.trim() ? `Trailer #${trailer.trim()}${t.constraints ? ` · ${t.constraints}` : ''}` : t.constraints;
-    saveTruck({ ...t, tractor: t.tractor.trim(), constraints: notes });
+    saveTruck({ ...t, tractor: t.tractor.trim() });
     onAdded(t.tractor.trim());
   }
   return (
     <div className="fleet-modal-back" onClick={onClose}>
       <div className="fleet-modal" onClick={(e) => e.stopPropagation()}>
         <h3>👥 Add Team to the Board</h3>
-        <p className="am-muted" style={{ fontSize: 12.5, marginTop: -4 }}>Type the two drivers, the truck &amp; trailer numbers, then Add. It shows up as a row on the matrix right away.</p>
+        <p className="am-muted" style={{ fontSize: 12.5, marginTop: -4 }}>Type the two drivers and the truck #, then Add. It shows up as a row on the matrix right away. Trailers are assigned per route inside each load (teams run power-only).</p>
         <div className="fleet-form-grid">
           <label className="otp-field"><span className="otp-field-label">Driver 1</span>
             <input className="am-input" list="addteam-roster" value={t.driver1} onChange={(e) => set('driver1', e.target.value)} placeholder="type or pick a driver…" /></label>
@@ -332,8 +330,6 @@ function AddTeamModal({ onClose, onAdded }: { onClose: () => void; onAdded: (tra
             <input className="am-input" list="addteam-roster" value={t.driver2} onChange={(e) => set('driver2', e.target.value)} placeholder="type or pick a driver…" /></label>
           <label className="otp-field"><span className="otp-field-label">Truck #</span>
             <input className="am-input" value={t.tractor} onChange={(e) => set('tractor', e.target.value)} placeholder="e.g. 512" /></label>
-          <label className="otp-field"><span className="otp-field-label">Trailer #</span>
-            <input className="am-input" value={trailer} onChange={(e) => setTrailer(e.target.value)} placeholder="e.g. 53012" /></label>
           <label className="otp-field"><span className="otp-field-label">Type</span>
             <select className="am-input" value={t.type} onChange={(e) => set('type', e.target.value)}>{TRUCK_TYPES.map((x) => <option key={x} value={x}>{x}</option>)}</select></label>
           <label className="otp-field"><span className="otp-field-label">Home terminal</span>
@@ -376,6 +372,12 @@ function TerminalRows({ term, trucks, dates, assign, setEditing, openDispatch, l
         const drivers = [t.driver1, t.driver2].filter(Boolean);
         const confirmedN = (t.driver1 && t.confirm1 ? 1 : 0) + (t.driver2 && t.confirm2 ? 1 : 0);
         const pct = drivers.length ? Math.round((confirmedN / drivers.length) * 100) : 0;
+        /* Assigned — NTD (Need To Dispatch): the truck has a route on the board
+           this week that isn't dispatched yet (pre-dispatch status). */
+        const hasUndispatchedRoute = dates.some((d) => {
+          const a = assign[cellKey(t.tractor, d)];
+          return a && a.route.trim() && ['unassigned', 'open', 'covered'].includes((a.status || '').toLowerCase());
+        });
         return (
         <tr key={t.tractor} className={rowCls}>
           <td className="am-truckcol">
@@ -394,7 +396,9 @@ function TerminalRows({ term, trucks, dates, assign, setEditing, openDispatch, l
               {hasFlyer && <span className={`am-confirmpct ${pct === 100 ? 'full' : ''}`}>{pct}% confirmed</span>}
             </div>
             <div className="am-ttype">{t.type}</div>
-            {meta.onMatrix && <div className="am-teamstatus" style={{ color: meta.color, background: meta.tint }}>{statusLabel}</div>}
+            {!down && hasUndispatchedRoute
+              ? <div className="am-teamstatus am-ntd" title="Has a route assigned but not dispatched yet">Assigned — NTD</div>
+              : meta.onMatrix && <div className="am-teamstatus" style={{ color: meta.color, background: meta.tint }}>{statusLabel}</div>}
             {t.constraints && <div className="am-teamnote">📝 {t.constraints}</div>}
           </td>
           {dates.map((d, di) => {
@@ -428,6 +432,8 @@ function TerminalRows({ term, trucks, dates, assign, setEditing, openDispatch, l
                       {a.usps && <span className="am-usps">USPS</span>}
                     </div>
                     <div className="am-status" style={{ color: STATUS_COLOR[a.status] }}>{STATUS_LABEL[a.status] ?? a.status}</div>
+                    {(() => { const ld = loads.get(k); const tr = (ld?.assignedTrailer || '').trim();
+                      return tr ? <div className="am-trailer" title={`Trailer #${tr} on this route`}>🚟 #{tr}</div> : null; })()}
                     {(() => {
                       const ld = loads.get(k); const dc = ld ? (docCounts[ld.id] ?? 0) : 0;
                       return (

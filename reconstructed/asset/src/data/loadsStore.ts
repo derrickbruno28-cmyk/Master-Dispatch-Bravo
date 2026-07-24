@@ -118,6 +118,22 @@ export function blankLoad(tractor: string, date: string, init?: Partial<Load>): 
 export function loadAll(): Load[] { return Object.values(read()); }
 export function loadById(id: string): Load | undefined { return read()[id]; }
 
+/* Trailer safety lock: a truck may only carry ONE trailer at a time. Returns the
+   OTHER active (not-completed) load already holding a trailer for this truck, so
+   the UI can block assigning a second trailer until that route is completed (which
+   frees the trailer). excludeId = the load being edited (so it never blocks itself). */
+export function activeTrailerConflict(truck: string, excludeId: string): Load | null {
+  const t = (truck || '').trim();
+  if (!t) return null;
+  for (const l of Object.values(read())) {
+    if (l.id === excludeId) continue;
+    if ((l.assignedTruck || '').trim() !== t) continue;
+    if (l.status === 'completed') continue;
+    if ((l.assignedTrailer || '').trim()) return l;
+  }
+  return null;
+}
+
 /** the load linked to a board cell — direct assignment or one of its segments */
 export function loadForCell(tractor: string, date: string): Load | undefined {
   for (const l of Object.values(read())) {

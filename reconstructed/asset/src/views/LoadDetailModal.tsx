@@ -4,10 +4,11 @@ import { jsPDF } from 'jspdf';
 import {
   blankLoad, loadForCell, saveLoad, clearLoadCell, missingForDispatch,
   buildSegments, proportionRevenue, handoffLabel, syncSegmentAssignments, loadTrucks,
-  fmtMoney, fmtMiles, fmtCpm, type Load, type LoadStop, type LoadSegment, blankStop,
+  activeTrailerConflict, fmtMoney, fmtMiles, fmtCpm, type Load, type LoadStop, type LoadSegment, blankStop,
 } from '../data/loadsStore';
 import { loadCustomers, ensureCustomer, EQUIPMENT_TYPES } from '../data/customersStore';
 import { loadFleet, saveTruck } from '../data/fleetStore';
+import { loadTrailers } from '../data/trailersStore';
 import { documentStore, type LoadDocument } from '../integrations/documents';
 import { routingProvider } from '../integrations/routing';
 import { rateConParser, applyRateCon } from '../integrations/ratecon';
@@ -134,7 +135,7 @@ export default function LoadDetailModal({ tractor, date, assignment, canDel, ini
           </div>
         )}
 
-        {tab === 'info' && <InfoTab l={l} f={f} canDel={canDel} assignable={!!(newLoad || seedLoad)} autoFilled={autoFilled} onRateCon={onRateCon} onClear={() => { clearLoadCell(tractor, date); onClear(); }} />}
+        {tab === 'info' && <InfoTab l={l} f={f} canDel={canDel} assignable={!!(newLoad || seedLoad)} autoFilled={autoFilled} onRateCon={onRateCon} onNotice={setNotice} onClear={() => { clearLoadCell(tractor, date); onClear(); }} />}
         {tab === 'stops' && <StopsTab l={l} setL={setL} persist={persist} />}
         {tab === 'docs' && <DocsTab loadId={l.id} />}
         {tab === 'dispatch' && (
@@ -167,15 +168,25 @@ function Sum({ label, val, money }: { label: string; val: string; money?: boolea
 }
 
 /* ---------------- Load Info ---------------- */
-function InfoTab({ l, f, canDel, assignable, autoFilled, onRateCon, onClear }: {
+function InfoTab({ l, f, canDel, assignable, autoFilled, onRateCon, onNotice, onClear }: {
   l: Load; f: <K extends keyof Load>(k: K, v: Load[K]) => void; canDel: boolean; assignable?: boolean;
-  autoFilled: Set<string>; onRateCon: (file: File) => void | Promise<void>; onClear: () => void;
+  autoFilled: Set<string>; onRateCon: (file: File) => void | Promise<void>; onNotice: (m: string) => void; onClear: () => void;
 }) {
   const customers = useMemo(() => loadCustomers(), []);
   const fleet = useMemo(() => loadFleet(), []);
+  const trailers = useMemo(() => loadTrailers(), []);
   const [confirmClear, setConfirmClear] = useState(false);
   const [drag, setDrag] = useState(false);
   const hl = (k: string) => `am-input${autoFilled.has(k) ? ' load-autofilled' : ''}`;
+  /* trailer safety lock: block a second trailer on a truck until its active
+     route completes (which frees the trailer). Clearing is always allowed. */
+  function trySetTrailer(v: string) {
+    if (v.trim()) {
+      const c = activeTrailerConflict(l.assignedTruck, l.id);
+      if (c) { onNotice(`🔒 Truck #${l.assignedTruck} still has trailer #${c.assignedTrailer} on ${c.routeName || 'an active route'}${c.date ? ` (${c.date})` : ''}. Mark that route Completed to free the trailer before assigning a new one.`); return; }
+    }
+    f('assignedTrailer', v);
+  }
   return (
     <div className="load-info-grid">
       <div className="load-fields">
@@ -190,7 +201,7 @@ function InfoTab({ l, f, canDel, assignable, autoFilled, onRateCon, onClear }: {
         </div>
         {assignable && (
           <div className="load-assign-box">
-            <div className="load-assign-title">Assignment <span className="am-muted">— start the schedule entry: type a truck # &amp; trailer (any number — it doesn't have to be a set-up team) and the board date. You can save with no route and fill the rest in later.</span></div>
+            <div className="load-assign-title">Assignment <span className="am-muted">— start the schedule entry: type a truck # (any number — it doesn't have to be a set-up team) and the board date. Assign the trailer below. You can save with no route and fill the rest in later.</span></div>
             <div className="load-two">
               <L t="Truck #">
                 <input className="am-input" list="load-trucks" value={l.assignedTruck}
@@ -198,9 +209,8 @@ function InfoTab({ l, f, canDel, assignable, autoFilled, onRateCon, onClear }: {
                   placeholder="type a truck # (or leave blank to place later)" />
                 <datalist id="load-trucks">{fleet.map((t) => <option key={t.tractor} value={t.tractor}>{[t.driver1, t.driver2].filter(Boolean).join(' / ') || t.type}</option>)}</datalist>
               </L>
-              <L t="Trailer #"><input className="am-input" value={l.assignedTrailer} onChange={(e) => f('assignedTrailer', e.target.value)} placeholder="e.g. 53012" /></L>
+              <L t="Board date (pickup day)"><input className="am-input" type="date" value={l.date} onChange={(e) => f('date', e.target.value)} /></L>
             </div>
-            <L t="Board date (pickup day)"><input className="am-input" type="date" value={l.date} onChange={(e) => f('date', e.target.value)} /></L>
           </div>
         )}
         <L t="Route name *"><input className={hl('routeName')} value={l.routeName} onChange={(e) => f('routeName', e.target.value)} placeholder="FA2D3-544 Irving→SATX" /></L>
@@ -215,9 +225,18 @@ function InfoTab({ l, f, canDel, assignable, autoFilled, onRateCon, onClear }: {
             </select>
           </L>
         </div>
-        <L t="Equipment (van type) *"><select className={hl('equipment')} value={l.equipment} onChange={(e) => f('equipment', e.target.value)}>
-          <option value="">— select —</option>{EQUIPMENT_TYPES.map((t) => <option key={t}>{t}</option>)}
-        </select></L>
+        <div className="load-two">
+          <L t="Equipment (van type) *"><select className={hl('equipment')} value={l.equipment} onChange={(e) => f('equipment', e.target.value)}>
+            <option value="">— select —</option>{EQUIPMENT_TYPES.map((t) => <option key={t}>{t}</option>)}
+          </select></L>
+          <L t="Trailer # (one per truck until this route completes)">
+            <input className={`am-input load-trailer-input${l.assignedTrailer.trim() ? ' has-trailer' : ''}`} list="load-trailers"
+              value={l.assignedTrailer} onChange={(e) => trySetTrailer(e.target.value)}
+              placeholder={l.assignedTruck.trim() ? 'power-only? leave blank · else assign a trailer' : 'assign a truck first'}
+              disabled={!l.assignedTruck.trim()} />
+            <datalist id="load-trailers">{trailers.map((t) => <option key={t.number} value={t.number}>{[t.type, t.status].filter(Boolean).join(' · ')}</option>)}</datalist>
+          </L>
+        </div>
         <div className="load-two">
           <L t="Rate (revenue $)"><input className={`${hl('rate')} load-rate-input`} type="number" value={l.rate ?? ''} onChange={(e) => f('rate', e.target.value === '' ? null : Number(e.target.value))} placeholder="0.00" /></L>
           <L t="Weight"><input className={hl('weight')} value={l.weight} onChange={(e) => f('weight', e.target.value)} placeholder="e.g. 24,000 lbs" /></L>

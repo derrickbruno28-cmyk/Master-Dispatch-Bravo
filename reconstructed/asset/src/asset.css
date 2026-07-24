@@ -544,6 +544,20 @@
 .drv-conf-chip.pending { color: #4a3808; background: #ecc94b; }
 .drv-conf-chip.confirmed { color: #12401f; background: #68d391; }
 
+/* ---- Assigned — NTD (has a route, not dispatched) light-blue row chip ---- */
+.am-ntd { color: #0b6aa2 !important; background: rgba(56,189,248,0.16) !important; border: 1px solid #7cc4f0; }
+:root[data-theme="dark"] .am-ntd, .am-ntd { }
+@media (prefers-color-scheme: dark) { .am-ntd { color: #7cc4f0 !important; } }
+:root[data-theme="dark"] .am-ntd { color: #7cc4f0 !important; }
+:root[data-theme="light"] .am-ntd { color: #0b6aa2 !important; }
+
+/* ---- trailer chip on a matrix cell + trailer field in the load ---- */
+.am-trailer { font-size: 9.5px; font-weight: 700; color: #0b6aa2; margin-top: 2px; }
+@media (prefers-color-scheme: dark) { .am-trailer { color: #7cc4f0; } }
+:root[data-theme="dark"] .am-trailer { color: #7cc4f0; }
+:root[data-theme="light"] .am-trailer { color: #0b6aa2; }
+.load-trailer-input.has-trailer { border-color: #7cc4f0; }
+
 /* ---- Loads page (date-range ledger + completion) ---- */
 .loads-filter { display: flex; gap: 10px; align-items: flex-end; flex-wrap: wrap; }
 .loads-quick { display: flex; gap: 4px; }
