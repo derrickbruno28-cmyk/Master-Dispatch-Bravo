@@ -10,7 +10,7 @@
    Firestore `loads` collection when Firebase is configured. */
 
 import { db, firebaseEnabled } from '../firebase';
-import { doc, setDoc, deleteDoc } from 'firebase/firestore';
+import { collection, doc, setDoc, deleteDoc, onSnapshot } from 'firebase/firestore';
 import { emitChange } from './bus';
 import { cellKey, setAssignment } from './schedule';
 import { routingProvider, type RoutePoint } from '../integrations/routing';
@@ -60,15 +60,33 @@ export interface Load {
 }
 
 const KEY = 'asset-loads-v1';
+const COL = 'loads';   // shared Firestore collection (this app's own project)
 
-function read(): Record<string, Load> {
+function readLocal(): Record<string, Load> {
   try { const r = localStorage.getItem(KEY); if (r) return JSON.parse(r) as Record<string, Load>; } catch { /* ignore */ }
   return {};
 }
-function write(map: Record<string, Load>) {
-  try { localStorage.setItem(KEY, JSON.stringify(map)); } catch { /* ignore */ }
-  emitChange();
+/* the load records, shared across the team. Live: filled by the onSnapshot
+   below. Demo: the localStorage copy. */
+let cache: Record<string, Load> = readLocal();
+function read(): Record<string, Load> { return cache; }
+function writeLocal() { try { localStorage.setItem(KEY, JSON.stringify(cache)); } catch { /* ignore */ } }
+function persistDoc(l: Load) { if (firebaseEnabled && db) setDoc(doc(db, COL, l.id), l as unknown as Record<string, unknown>).catch((e) => console.error('load write failed', e)); }
+function deleteDocById(id: string) { if (firebaseEnabled && db) deleteDoc(doc(db, COL, id)).catch((e) => console.error('load delete failed', e)); }
+
+let synced = false;
+/* live-subscribe to the shared load records (once) */
+export function startLoadsSync() {
+  if (synced || !firebaseEnabled || !db) return;
+  synced = true;
+  const database = db;
+  onSnapshot(collection(database, COL), (snap) => {
+    const next: Record<string, Load> = {};
+    snap.forEach((d) => { next[d.id] = d.data() as Load; });
+    cache = next; emitChange();
+  }, (e) => console.error('loads sync failed', e));
 }
+if (firebaseEnabled) startLoadsSync();
 
 export function blankStop(type: LoadStop['type'], sequence: number): LoadStop {
   return { type, sequence, address: '', city: '', state: '', zip: '', dateTime: '', poNumber: '', refNo: '', notes: '' };
@@ -102,41 +120,50 @@ export function loadForCell(tractor: string, date: string): Load | undefined {
 
 export async function saveLoad(l: Load): Promise<Load> {
   const withMiles = await recalcMiles(l);
-  const map = read(); map[withMiles.id] = withMiles; write(map);
-  if (firebaseEnabled && db) {
-    try { await setDoc(doc(db, 'loads', withMiles.id), withMiles as unknown as Record<string, unknown>); }
-    catch (e) { console.error('loads write failed', e); }
-  }
+  cache = { ...cache, [withMiles.id]: withMiles };
+  if (firebaseEnabled && db) persistDoc(withMiles); else writeLocal();
+  emitChange();
   return withMiles;
 }
 
 export function removeLoad(id: string) {
-  const map = read(); delete map[id]; write(map);
-  if (firebaseEnabled && db) { deleteDoc(doc(db, 'loads', id)).catch((e) => console.error('loads delete failed', e)); }
+  const next = { ...cache }; delete next[id]; cache = next;
+  if (firebaseEnabled && db) deleteDocById(id); else writeLocal();
+  emitChange();
 }
 
 /** keep loads linked when a chip is dragged to another cell */
 export function moveLoadCell(fromKey: string, toKey: string) {
   const i = toKey.indexOf('_'); const toTruck = toKey.slice(0, i); const toDate = toKey.slice(i + 1);
   const j = fromKey.indexOf('_'); const fromTruck = fromKey.slice(0, j); const fromDate = fromKey.slice(j + 1);
-  const map = read(); let dirty = false;
+  const map = { ...cache }; const changed: Load[] = [];
   for (const l of Object.values(map)) {
     if (l.date === fromDate && l.assignedTruck === fromTruck && l.segments.length === 0) {
-      l.assignedTruck = toTruck; l.assignedTeamId = toTruck; l.date = toDate; dirty = true;
+      l.assignedTruck = toTruck; l.assignedTeamId = toTruck; l.date = toDate; changed.push(l);
     } else if (l.date === fromDate) {
-      for (const s of l.segments) if (s.assignedTruck === fromTruck) { s.assignedTruck = toTruck; s.assignedTeamId = toTruck; dirty = true; }
+      let hit = false;
+      for (const s of l.segments) if (s.assignedTruck === fromTruck) { s.assignedTruck = toTruck; s.assignedTeamId = toTruck; hit = true; }
+      if (hit) changed.push(l);
     }
   }
-  if (dirty) write(map);
+  if (changed.length) {
+    cache = map;
+    if (firebaseEnabled && db) changed.forEach(persistDoc); else writeLocal();
+    emitChange();
+  }
 }
 
 /** clearing a board cell removes the linked single-truck load (segments survive on other rows) */
 export function clearLoadCell(tractor: string, date: string) {
-  const map = read(); let dirty = false;
+  const map = { ...cache }; const removed: string[] = [];
   for (const [id, l] of Object.entries(map)) {
-    if (l.date === date && l.assignedTruck === tractor && l.segments.length === 0) { delete map[id]; dirty = true; }
+    if (l.date === date && l.assignedTruck === tractor && l.segments.length === 0) { delete map[id]; removed.push(id); }
   }
-  if (dirty) write(map);
+  if (removed.length) {
+    cache = map;
+    if (firebaseEnabled && db) removed.forEach(deleteDocById); else writeLocal();
+    emitChange();
+  }
 }
 
 /* ---- mileage & CPM (RoutingProvider — estimate now, exact later) ---- */

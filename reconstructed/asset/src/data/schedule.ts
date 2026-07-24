@@ -28,15 +28,34 @@ export function mondayOf(d: Date) { const x = new Date(d); const dow = (x.getDay
 export function addDays(d: Date, n: number) { const x = new Date(d); x.setDate(x.getDate() + n); return x; }
 
 const LS_KEY = 'asset-matrix-v1';
+const COL = 'assetSchedule';   // shared Firestore collection (one doc per cell)
 
 function readLocal(): Record<string, Assignment> {
   try { const raw = localStorage.getItem(LS_KEY); if (raw) return JSON.parse(raw) as Record<string, Assignment>; } catch { /* ignore */ }
   return {};
 }
-function writeLocal(map: Record<string, Assignment>) {
-  try { localStorage.setItem(LS_KEY, JSON.stringify(map)); } catch { /* ignore */ }
-  emitChange();
+/* the board cells, shared across the team. Live mode: filled by the onSnapshot
+   below from Firestore. Demo mode: the localStorage copy. Every view reads this
+   through loadAssignments(). */
+let cache: Record<string, Assignment> = readLocal();
+function writeLocal() {
+  try { localStorage.setItem(LS_KEY, JSON.stringify(cache)); } catch { /* ignore */ }
 }
+
+let synced = false;
+/* live-subscribe to the shared board (once). Asset-native cells only — this app
+   runs on its own Firebase project, so there's no Bravo merge here. */
+export function startScheduleSync() {
+  if (synced || !firebaseEnabled || !db) return;
+  synced = true;
+  const database = db;
+  onSnapshot(collection(database, COL), (snap) => {
+    const next: Record<string, Assignment> = {};
+    snap.forEach((d) => { const v = d.data() as Assignment; next[d.id] = { route: v.route || '', status: v.status || '', usps: !!v.usps }; });
+    cache = next; emitChange();
+  }, (e) => console.error('schedule sync failed', e));
+}
+if (firebaseEnabled) startScheduleSync();
 
 /* Demo seed so the board isn't empty on first run. */
 function seed(): Record<string, Assignment> {
@@ -51,13 +70,14 @@ function seed(): Record<string, Assignment> {
   return out;
 }
 
-/* Persist the seed once so all views (Matrix, Covered) see the same demo data. */
+/* Persist the seed once so all views (Matrix, Covered) see the same demo data.
+   Demo only — the live board is shared, so we never seed fake cells into it. */
 export function ensureSeed() {
-  const cur = readLocal();
-  if (Object.keys(cur).length === 0) writeLocal(seed());
+  if (firebaseEnabled) return;
+  if (Object.keys(cache).length === 0) { cache = seed(); writeLocal(); emitChange(); }
 }
 
-export function loadAssignments(): Record<string, Assignment> { return readLocal(); }
+export function loadAssignments(): Record<string, Assignment> { return cache; }
 
 /* ---- load-status vocabulary (the ONE source; the Matrix cell + the Fleet
    Status page both read these so a truck's operational status never disagrees
@@ -96,22 +116,24 @@ export function currentLoadStatus(tractor: string, assign?: Record<string, Assig
 /* Single write path. Updates the browser copy (demo) and, when live, the shared
    Firestore collection + Bravo mirror. Pass a null/blank assignment to clear. */
 export async function setAssignment(tractor: string, date: string, a: Assignment | null) {
-  const map = readLocal();
   const k = cellKey(tractor, date);
   const clear = !a || !a.route.trim();
-  if (clear) delete map[k]; else map[k] = a!;
-  writeLocal(map);
+  /* optimistic local update so the editing user sees it instantly; the snapshot
+     then confirms it for everyone else */
+  const next = { ...cache }; if (clear) delete next[k]; else next[k] = a!;
+  cache = next;
 
   if (firebaseEnabled && db) {
     try {
-      const ref = doc(db, 'assetSchedule', k);
+      const ref = doc(db, COL, k);
       if (clear) await deleteDoc(ref);
       else await setDoc(ref, { tractor, date, ...a });
       await mirrorToBravo(tractor, date, clear ? null : a!);
     } catch (e) {
       console.error('assetSchedule write failed', e);
     }
-  }
+  } else { writeLocal(); }
+  emitChange();
 }
 
 /* ---- double-booking guard --------------------------------------------------
@@ -144,7 +166,7 @@ export function driverConflicts(
 /* Move an assignment from one cell to another (drag-to-move). */
 export async function moveAssignment(fromKey: string, toKey: string) {
   if (fromKey === toKey) return;
-  const a = readLocal()[fromKey];
+  const a = cache[fromKey];
   if (!a) return;
   const to = parseCellKey(toKey);
   const from = parseCellKey(fromKey);

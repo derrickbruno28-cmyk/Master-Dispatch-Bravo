@@ -4,6 +4,8 @@
 
 import { TRUCKS as SEED, TERMINALS, TERMINAL_LABELS } from './fleet';
 import { emitChange } from './bus';
+import { db, firebaseEnabled } from '../firebase';
+import { collection, doc, onSnapshot, setDoc, deleteDoc } from 'firebase/firestore';
 
 export interface FleetTruck {
   tractor: string; rating: string; driver1: string; driver2: string;
@@ -19,30 +21,67 @@ export interface FleetTruck {
 export { TERMINALS, TERMINAL_LABELS };
 
 const KEY = 'asset-fleet-v2';   // v2 = Houston terminal removed (#444 → SATX) + flyer/confirm fields
+const COL = 'assetFleet';       // shared Firestore collection (one doc per tractor)
 
-function read(): FleetTruck[] {
-  try { const r = localStorage.getItem(KEY); if (r) return (JSON.parse(r) as FleetTruck[]).map((t) => ({ deadheadTo: '', flyer: '' as const, confirm1: false, confirm2: false, ...t })); } catch { /* ignore */ }
-  return SEED.map((t) => ({ ...t, constraints: '', deadheadTo: '', flyer: '' as const, confirm1: false, confirm2: false }));
+function normTruck(t: Partial<FleetTruck>): FleetTruck {
+  return {
+    ...(t as FleetTruck),
+    constraints: t.constraints ?? '',
+    deadheadTo: t.deadheadTo ?? '',
+    flyer: (t.flyer ?? '') as FleetTruck['flyer'],
+    confirm1: t.confirm1 ?? false,
+    confirm2: t.confirm2 ?? false,
+  };
 }
-function write(list: FleetTruck[]) {
-  try { localStorage.setItem(KEY, JSON.stringify(list)); } catch { /* ignore */ }
-  emitChange();
-}
+function seedTrucks(): FleetTruck[] { return SEED.map((t) => normTruck(t)); }
 
-export function loadFleet(): FleetTruck[] { return read(); }
+function readLocal(): FleetTruck[] | null {
+  try { const r = localStorage.getItem(KEY); if (r) return (JSON.parse(r) as FleetTruck[]).map(normTruck); } catch { /* ignore */ }
+  return null;
+}
+function writeLocal() { try { localStorage.setItem(KEY, JSON.stringify(cache)); } catch { /* ignore */ } }
+
+/* shared fleet, across the team. Live: filled by the onSnapshot below (seeded
+   from the roster on first run). Demo: localStorage, else the built-in seed. */
+let cache: FleetTruck[] = readLocal() ?? seedTrucks();
+let synced = false;
+let hydrated = false;
+
+export function startFleetSync() {
+  if (synced || !firebaseEnabled || !db) return;
+  synced = true;
+  const database = db;
+  onSnapshot(collection(database, COL), (snap) => {
+    if (snap.empty && !hydrated) {
+      hydrated = true;
+      for (const t of seedTrucks()) setDoc(doc(database, COL, t.tractor), t as unknown as Record<string, unknown>).catch((e) => console.error('fleet seed failed', e));
+      return;
+    }
+    hydrated = true;
+    cache = snap.docs.map((d) => normTruck({ ...(d.data() as Partial<FleetTruck>), tractor: d.id }));
+    emitChange();
+  }, (e) => console.error('fleet sync failed', e));
+}
+if (firebaseEnabled) startFleetSync();
+
+export function loadFleet(): FleetTruck[] { return cache; }
 
 export function saveTruck(t: FleetTruck) {
-  const list = read();
-  const i = list.findIndex((x) => x.tractor === t.tractor);
-  if (i >= 0) list[i] = t; else list.push(t);
-  write(list);
-  return list;
+  const nt = normTruck(t);
+  const i = cache.findIndex((x) => x.tractor === nt.tractor);
+  cache = i >= 0 ? cache.map((x) => (x.tractor === nt.tractor ? nt : x)) : [...cache, nt];
+  if (firebaseEnabled && db) setDoc(doc(db, COL, nt.tractor), nt as unknown as Record<string, unknown>).catch((e) => console.error('fleet write failed', e));
+  else writeLocal();
+  emitChange();
+  return cache;
 }
 
 export function removeTruck(tractor: string) {
-  const list = read().filter((t) => t.tractor !== tractor);
-  write(list);
-  return list;
+  cache = cache.filter((t) => t.tractor !== tractor);
+  if (firebaseEnabled && db) deleteDoc(doc(db, COL, tractor)).catch((e) => console.error('fleet delete failed', e));
+  else writeLocal();
+  emitChange();
+  return cache;
 }
 
 export function blankTruck(): FleetTruck {
