@@ -3,6 +3,8 @@ import { samsaraKey, setSamsaraKey, maskedKey, samsaraStatus, samsara, type Conn
 import { fleetioClient } from '../integrations/telematics';
 import { maptilerKey, setMaptilerKey, maptilerMasked } from '../integrations/mapstyle';
 import { onChange, emitChange } from '../data/bus';
+import { firebaseEnabled } from '../firebase';
+import { hasLocalData, localCounts, restoreLocalToShared } from '../data/recoverLocal';
 
 /* Integrations — the connection panel for external telematics. Samsara is the
    big one: paste an API key here (kept in this browser only, never in code), and
@@ -39,6 +41,16 @@ export default function SettingsView() {
   }
   function clear() { setSamsaraKey(''); setDraft(''); emitChange(); }
 
+  const [restoring, setRestoring] = useState(false);
+  const [restoreMsg, setRestoreMsg] = useState('');
+  const counts = localCounts();
+  async function doRestore() {
+    setRestoring(true); setRestoreMsg('');
+    const res = await restoreLocalToShared();
+    setRestoring(false);
+    setRestoreMsg(`✓ Restored ${res.drivers} driver${res.drivers === 1 ? '' : 's'} and ${res.fleet} truck${res.fleet === 1 ? '' : 's'} from this device to the shared team roster. Everyone will see them now.`);
+  }
+
   return (
     <div className="am-page">
       <div className="am-head"><h2>Integrations</h2></div>
@@ -46,6 +58,24 @@ export default function SettingsView() {
         Connect the trucks' telematics here. Keys live only in your browser and are never stored in the app's code.
         The connection UI is ready now; features run on realistic placeholder data until the backend link is finished.
       </p>
+
+      {/* recover data saved on this device before shared sync existed */}
+      {firebaseEnabled && hasLocalData() && (
+        <div className="intg-card" style={{ borderColor: 'var(--amber)' }}>
+          <div className="intg-card-head">
+            <div className="intg-card-title">🛟 Restore this device's data to the team</div>
+          </div>
+          <p className="am-muted" style={{ fontSize: 12.5, maxWidth: 720 }}>
+            This device has <b>{counts.drivers} drivers</b> and <b>{counts.fleet} trucks</b> saved from before the app shared data across the team.
+            If your Driver Availability or Fleet Status edits went missing after an update, click below on <b>the device where you made those edits</b> to
+            push them into the shared roster for everyone. It only adds/updates — it never deletes anyone.
+          </p>
+          <div className="am-lockbtns">
+            <button className="am-save" disabled={restoring} onClick={doRestore}>{restoring ? 'Restoring…' : '🛟 Restore to shared roster'}</button>
+          </div>
+          {restoreMsg && <div className="am-notice" style={{ color: 'var(--green)', marginTop: 8 }}>{restoreMsg}</div>}
+        </div>
+      )}
 
       {/* Samsara */}
       <div className="intg-card">
