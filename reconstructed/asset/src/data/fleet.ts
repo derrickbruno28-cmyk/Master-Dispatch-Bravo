@@ -18,8 +18,8 @@ export const CITY_COORDS: Record<string,{lat:number;lng:number}> = {COPPELL:{lat
 export const TRUCKS: Truck[] = [
 {tractor:"447",rating:"A (G)(I)",driver1:"Christopher Rinehart",driver2:"Erin del Bosque",type:"OMNI Weekly Team",currentCity:"COPPELL",homeCity:"DALLAS",returnDate:"",hoursAvail:55,status:"dispatched",currentRoute:"LS 16182 - VA to TX"},
 {tractor:"458",rating:"A",driver1:"Timothy Brown",driver2:"Ibrahima Fall",type:"OMNI Weekly Team",currentCity:"COPPELL",homeCity:"DALLAS",returnDate:"",hoursAvail:48,status:"dispatched",currentRoute:"LS 16183 - OMNI"},
-{tractor:"761",rating:"A (I)",driver1:"Carlos Ramirez",driver2:"",type:"OTR Solo",currentCity:"DALLAS",homeCity:"DALLAS",returnDate:"03/03",hoursAvail:32,status:"delivering",currentRoute:"16151 VA-TX"},
-{tractor:"456",rating:"A",driver1:"Robert Spangler Sr.",driver2:"Jose Guajardo",type:"OTR Team",currentCity:"SATX",homeCity:"SATX",returnDate:"03/02",hoursAvail:45,status:"delivering",currentRoute:"16186 SC-TX"},
+{tractor:"761",rating:"A (I)",driver1:"Carlos Ramirez",driver2:"",type:"OTR Solo",currentCity:"DALLAS",homeCity:"DALLAS",returnDate:"03/03",hoursAvail:32,status:"En Route",currentRoute:"16151 VA-TX"},
+{tractor:"456",rating:"A",driver1:"Robert Spangler Sr.",driver2:"Jose Guajardo",type:"OTR Team",currentCity:"SATX",homeCity:"SATX",returnDate:"03/02",hoursAvail:45,status:"En Route",currentRoute:"16186 SC-TX"},
 {tractor:"758",rating:"A (I)",driver1:"Rafael Gama",driver2:"Salvador Luna",type:"OTR Team",currentCity:"OPA LOCKA",homeCity:"SATX",returnDate:"",hoursAvail:60,status:"en route",currentRoute:"DH to OPA → 16193 Opa-Irv"},
 {tractor:"765",rating:"A (G)(I)",driver1:"Derek Brewer",driver2:"Derrick Frazier",type:"OTR Team",currentCity:"MEMPHIS",homeCity:"DALLAS",returnDate:"03/25",hoursAvail:58,status:"en route",currentRoute:"16191 TN-VA"},
 {tractor:"957",rating:"A",driver1:"Daniel Williams",driver2:"Ricky Rodriguez",type:"OTR Team",currentCity:"COPPELL",homeCity:"SATX",returnDate:"End of March",hoursAvail:52,status:"en route",currentRoute:"16207 COP-CO"},

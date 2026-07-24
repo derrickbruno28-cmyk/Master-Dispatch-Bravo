@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { TERMINALS, TERMINAL_LABELS } from '../data/fleet';
-import { loadFleet, saveTruck, teamStatusMeta, isShutdown, type FleetTruck } from '../data/fleetStore';
-import { loadDrivers } from '../data/driversStore';
+import { loadFleet, saveTruck, teamStatusMeta, isShutdown, blankTruck, TRUCK_TYPES, type FleetTruck } from '../data/fleetStore';
+import { loadDrivers, driverNames } from '../data/driversStore';
 import { onChange } from '../data/bus';
 import {
   loadAssignments, setAssignment, moveAssignment, ensureSeed, cellKey, parseCellKey,
@@ -50,6 +50,7 @@ export default function AssetMatrixView() {
   const [editing, setEditing] = useState<string | null>(null);
   const [editTab, setEditTab] = useState<'info' | 'dispatch' | undefined>(undefined);
   const [createNew, setCreateNew] = useState(false);
+  const [addTeam, setAddTeam] = useState(false);               // quick "add a team to the board" modal
   const [placing, setPlacing] = useState<Load | null>(null);   // an unassigned load being placed on the board
   const [loadsTick, setLoadsTick] = useState(0);               // bump to recompute load-derived views
   const [docCounts, setDocCounts] = useState<Record<string, number>>({});
@@ -203,6 +204,7 @@ export default function AssetMatrixView() {
             {positions.map((p) => <option key={p} value={p}>{p}</option>)}
           </select>
           <span className="am-muted">{weekTotal} assigned this week</span>
+          <button className="am-save fleet-add" onClick={() => setAddTeam(true)}>👥 Add Team</button>
           <button className="am-save fleet-add" onClick={() => setCreateNew(true)}>➕ Create Load</button>
         </div>
         {unassignedLoads.length > 0 && (
@@ -299,6 +301,51 @@ export default function AssetMatrixView() {
           onClose={() => setPlacing(null)}
         />
       )}
+      {addTeam && <AddTeamModal onClose={() => setAddTeam(false)} onAdded={(tractor) => { setAddTeam(false); flash(`✓ Team #${tractor} added to the board.`); }} />}
+    </div>
+  );
+}
+
+/* Quick "add a team to the board" — type driver 1 & 2, a truck # and trailer,
+   pick the type/home terminal, Add. Creates a fleet team so it shows up as a row
+   on the Asset Matrix immediately (the full editor lives on Team Status). */
+function AddTeamModal({ onClose, onAdded }: { onClose: () => void; onAdded: (tractor: string) => void }) {
+  const roster = useMemo(() => driverNames(), []);
+  const [t, setT] = useState<FleetTruck>(() => blankTruck());
+  const [trailer, setTrailer] = useState('');
+  const set = <K extends keyof FleetTruck>(k: K, v: FleetTruck[K]) => setT((p) => ({ ...p, [k]: v }));
+  function add() {
+    if (!t.tractor.trim()) return;
+    const notes = trailer.trim() ? `Trailer #${trailer.trim()}${t.constraints ? ` · ${t.constraints}` : ''}` : t.constraints;
+    saveTruck({ ...t, tractor: t.tractor.trim(), constraints: notes });
+    onAdded(t.tractor.trim());
+  }
+  return (
+    <div className="fleet-modal-back" onClick={onClose}>
+      <div className="fleet-modal" onClick={(e) => e.stopPropagation()}>
+        <h3>👥 Add Team to the Board</h3>
+        <p className="am-muted" style={{ fontSize: 12.5, marginTop: -4 }}>Type the two drivers, the truck &amp; trailer numbers, then Add. It shows up as a row on the matrix right away.</p>
+        <div className="fleet-form-grid">
+          <label className="otp-field"><span className="otp-field-label">Driver 1</span>
+            <input className="am-input" list="addteam-roster" value={t.driver1} onChange={(e) => set('driver1', e.target.value)} placeholder="type or pick a driver…" /></label>
+          <label className="otp-field"><span className="otp-field-label">Driver 2 (leave blank for solo)</span>
+            <input className="am-input" list="addteam-roster" value={t.driver2} onChange={(e) => set('driver2', e.target.value)} placeholder="type or pick a driver…" /></label>
+          <label className="otp-field"><span className="otp-field-label">Truck #</span>
+            <input className="am-input" value={t.tractor} onChange={(e) => set('tractor', e.target.value)} placeholder="e.g. 512" /></label>
+          <label className="otp-field"><span className="otp-field-label">Trailer #</span>
+            <input className="am-input" value={trailer} onChange={(e) => setTrailer(e.target.value)} placeholder="e.g. 53012" /></label>
+          <label className="otp-field"><span className="otp-field-label">Type</span>
+            <select className="am-input" value={t.type} onChange={(e) => set('type', e.target.value)}>{TRUCK_TYPES.map((x) => <option key={x} value={x}>{x}</option>)}</select></label>
+          <label className="otp-field"><span className="otp-field-label">Home terminal</span>
+            <select className="am-input" value={t.homeCity} onChange={(e) => set('homeCity', e.target.value)}>{TERMINALS.map((x) => <option key={x} value={x}>{TERMINAL_LABELS[x] ?? x}</option>)}</select></label>
+        </div>
+        <datalist id="addteam-roster">{roster.map((n) => <option key={n} value={n} />)}</datalist>
+        <div className="fleet-modal-btns">
+          <button className="am-save" disabled={!t.tractor.trim()} onClick={add}>Add team</button>
+          <button className="am-cancel" onClick={onClose}>Cancel</button>
+          {!t.tractor.trim() && <span className="am-muted" style={{ fontSize: 11, color: 'var(--red)' }}>Truck # is required.</span>}
+        </div>
+      </div>
     </div>
   );
 }
@@ -381,17 +428,6 @@ function TerminalRows({ term, trucks, dates, assign, setEditing, openDispatch, l
                       {a.usps && <span className="am-usps">USPS</span>}
                     </div>
                     <div className="am-status" style={{ color: STATUS_COLOR[a.status] }}>{STATUS_LABEL[a.status] ?? a.status}</div>
-                    {(() => {
-                      const ld = loads.get(k);
-                      if (!ld || (!ld.driver1 && !ld.driver2)) return null;
-                      const dot = (nm: string, fl: boolean, cf: boolean) => !nm ? null : (
-                        <span key={nm} className={`am-drvdot ${cf ? 'cf' : fl ? 'pd' : 'as'}`}
-                          title={cf ? `${nm} — confirmed` : fl ? `${nm} — flyer sent, awaiting confirm` : `${nm} — assigned`}>
-                          {nm.split(' ')[0]}
-                        </span>
-                      );
-                      return <div className="am-drvstrip">{dot(ld.driver1, ld.driver1Flyer, ld.driver1Confirmed)}{dot(ld.driver2, ld.driver2Flyer, ld.driver2Confirmed)}</div>;
-                    })()}
                     {(() => {
                       const ld = loads.get(k); const dc = ld ? (docCounts[ld.id] ?? 0) : 0;
                       return (

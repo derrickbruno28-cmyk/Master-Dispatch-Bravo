@@ -3,12 +3,11 @@ import html2canvas from 'html2canvas';
 import { jsPDF } from 'jspdf';
 import {
   blankLoad, loadForCell, saveLoad, clearLoadCell, missingForDispatch,
-  buildSegments, proportionRevenue, loadTotals, handoffLabel, syncSegmentAssignments, loadTrucks,
+  buildSegments, proportionRevenue, handoffLabel, syncSegmentAssignments, loadTrucks,
   fmtMoney, fmtMiles, fmtCpm, type Load, type LoadStop, type LoadSegment, blankStop,
 } from '../data/loadsStore';
 import { loadCustomers, ensureCustomer, EQUIPMENT_TYPES } from '../data/customersStore';
 import { loadFleet, saveTruck } from '../data/fleetStore';
-import { driverNames, driverByName } from '../data/driversStore';
 import { documentStore, type LoadDocument } from '../integrations/documents';
 import { routingProvider } from '../integrations/routing';
 import { rateConParser, applyRateCon } from '../integrations/ratecon';
@@ -22,13 +21,7 @@ import { LOAD_STATUS_LABEL, type Assignment } from '../data/schedule';
 
 const STATUSES = ['unassigned', 'open', 'covered', 'dispatched', 'at yard', 'at shipper', 'en route', 'at receiver', 'delivered', 'completed', 'off'];
 
-type Tab = 'info' | 'stops' | 'docs' | 'split' | 'dispatch';
-
-/* per-driver dispatch state → color: confirmed = light green, flyer-sent-but-not-
-   confirmed = yellow (pending), otherwise just assigned */
-function driverState(flyer: boolean, confirmed: boolean): 'confirmed' | 'pending' | 'assigned' {
-  return confirmed ? 'confirmed' : flyer ? 'pending' : 'assigned';
-}
+type Tab = 'info' | 'stops' | 'docs' | 'dispatch';
 
 export default function LoadDetailModal({ tractor, date, assignment, canDel, initialTab, warning, newLoad, seedLoad, onSave, onClear, onCreated, onClose }: {
   tractor: string; date: string; assignment?: Assignment; canDel: boolean; initialTab?: Tab; warning?: string;
@@ -119,7 +112,7 @@ export default function LoadDetailModal({ tractor, date, assignment, canDel, ini
 
         {/* tabs */}
         <div className="load-tabs">
-          {([['info', 'Load Info'], ['stops', 'Stops'], ['docs', 'Documents'], ['split', l.segments.length ? `✂ Split (${l.segments.length})` : '✂ Split'], ['dispatch', 'Dispatch']] as [Tab, string][]).map(([k, lab]) => (
+          {([['info', 'Load Info'], ['stops', l.segments.length ? `Stops · ✂${l.segments.length}` : 'Stops'], ['docs', 'Documents'], ['dispatch', 'Dispatch']] as [Tab, string][]).map(([k, lab]) => (
             <button key={k} className={`load-tab ${tab === k ? 'on' : ''}`} onClick={() => setTab(k)}>{lab}</button>
           ))}
         </div>
@@ -144,7 +137,6 @@ export default function LoadDetailModal({ tractor, date, assignment, canDel, ini
         {tab === 'info' && <InfoTab l={l} f={f} canDel={canDel} assignable={!!(newLoad || seedLoad)} autoFilled={autoFilled} onRateCon={onRateCon} onClear={() => { clearLoadCell(tractor, date); onClear(); }} />}
         {tab === 'stops' && <StopsTab l={l} setL={setL} persist={persist} />}
         {tab === 'docs' && <DocsTab loadId={l.id} />}
-        {tab === 'split' && <SplitTab l={l} setL={setL} persist={persist} />}
         {tab === 'dispatch' && (
           <DispatchTab l={l} missing={missing} flash={setNotice}
             onDispatched={async (sendTo) => {
@@ -181,21 +173,9 @@ function InfoTab({ l, f, canDel, assignable, autoFilled, onRateCon, onClear }: {
 }) {
   const customers = useMemo(() => loadCustomers(), []);
   const fleet = useMemo(() => loadFleet(), []);
-  const roster = useMemo(() => driverNames(), []);
   const [confirmClear, setConfirmClear] = useState(false);
   const [drag, setDrag] = useState(false);
   const hl = (k: string) => `am-input${autoFilled.has(k) ? ' load-autofilled' : ''}`;
-  /* driver-availability check against the board date */
-  function availWarn(name: string): string {
-    const d = driverByName(name); if (!d || !d.readyDate || !l.date) return '';
-    if (l.date < d.readyDate) return `⚠ ${(name.split(' ')[0] || name)} isn't available until ${d.readyDate} (ready-to-go date)`;
-    return '';
-  }
-  function pickTruck(v: string) {
-    f('assignedTruck', v); f('assignedTeamId', v);
-    const t = fleet.find((x) => x.tractor === v);
-    if (t) { if (!l.driver1) f('driver1', t.driver1 || ''); if (!l.driver2) f('driver2', t.driver2 || ''); }
-  }
   return (
     <div className="load-info-grid">
       <div className="load-fields">
@@ -210,13 +190,13 @@ function InfoTab({ l, f, canDel, assignable, autoFilled, onRateCon, onClear }: {
         </div>
         {assignable && (
           <div className="load-assign-box">
-            <div className="load-assign-title">Assignment <span className="am-muted">— start the schedule entry: pick the team, truck &amp; trailer and a date. You can save with no route and fill the rest in later.</span></div>
+            <div className="load-assign-title">Assignment <span className="am-muted">— start the schedule entry: type a truck # &amp; trailer (any number — it doesn't have to be a set-up team) and the board date. You can save with no route and fill the rest in later.</span></div>
             <div className="load-two">
-              <L t="Assign to truck">
-                <select className="am-input" value={l.assignedTruck} onChange={(e) => pickTruck(e.target.value)}>
-                  <option value="">— Unassigned (place later) —</option>
-                  {fleet.map((t) => <option key={t.tractor} value={t.tractor}>#{t.tractor} — {[t.driver1, t.driver2].filter(Boolean).join(' / ') || t.type}</option>)}
-                </select>
+              <L t="Truck #">
+                <input className="am-input" list="load-trucks" value={l.assignedTruck}
+                  onChange={(e) => { f('assignedTruck', e.target.value); f('assignedTeamId', e.target.value); }}
+                  placeholder="type a truck # (or leave blank to place later)" />
+                <datalist id="load-trucks">{fleet.map((t) => <option key={t.tractor} value={t.tractor}>{[t.driver1, t.driver2].filter(Boolean).join(' / ') || t.type}</option>)}</datalist>
               </L>
               <L t="Trailer #"><input className="am-input" value={l.assignedTrailer} onChange={(e) => f('assignedTrailer', e.target.value)} placeholder="e.g. 53012" /></L>
             </div>
@@ -249,18 +229,6 @@ function InfoTab({ l, f, canDel, assignable, autoFilled, onRateCon, onClear }: {
         <L t="Commodity"><input className={hl('commodity')} value={l.commodity} onChange={(e) => f('commodity', e.target.value)} /></L>
         <L t="Dispatch notes"><textarea className="am-input" rows={2} value={l.dispatchNotes} onChange={(e) => f('dispatchNotes', e.target.value)} /></L>
         <label className="am-usps-check"><input type="checkbox" checked={l.uspsContract} onChange={(e) => f('uspsContract', e.target.checked)} /> USPS contract route</label>
-
-        {/* Drivers & confirmation — assign each driver + track flyer/confirm per driver */}
-        <div className="load-drivers-conf">
-          <div className="load-assign-title">Drivers &amp; confirmation <span className="am-muted">— flyer sent → <b className="dc-y">pending</b>, confirmed → <b className="dc-g">ready</b>. Each driver independently.</span></div>
-          <DriverConfRow n={1} name={l.driver1} roster={roster} warn={availWarn(l.driver1)}
-            flyer={l.driver1Flyer} confirmed={l.driver1Confirmed}
-            onName={(v) => f('driver1', v)} onFlyer={(v) => f('driver1Flyer', v)} onConfirm={(v) => f('driver1Confirmed', v)} />
-          <DriverConfRow n={2} name={l.driver2} roster={roster} warn={availWarn(l.driver2)} optional
-            flyer={l.driver2Flyer} confirmed={l.driver2Confirmed}
-            onName={(v) => f('driver2', v)} onFlyer={(v) => f('driver2Flyer', v)} onConfirm={(v) => f('driver2Confirmed', v)} />
-          <datalist id="load-roster">{roster.map((n) => <option key={n} value={n} />)}</datalist>
-        </div>
 
         {!assignable && (
           <div className="load-clear-row">
@@ -304,11 +272,30 @@ function StopsTab({ l, setL, persist }: { l: Load; setL: React.Dispatch<React.Se
   const del = (i: number) => setL((p) => ({ ...p, stops: p.stops.filter((_, j) => j !== i) }));
 
   /* split control — live here next to ＋Pickup/＋Delivery so the split can be
-     added and MOVED right from the stops list (the ✂ Split tab still assigns
-     a truck to each leg). A "cut" is a stop index between pickup and delivery. */
+     added and MOVED right from the stops list. Per-leg truck assignment lives
+     here too (no separate Split tab). A "cut" is a stop index between pickup
+     and delivery. */
   const sorted = useMemo(() => l.stops.slice().sort((a, b) => a.sequence - b.sequence), [l.stops]);
   const canSplit = sorted.length >= 3;
   const cuts = l.segments.slice(0, -1).map((s) => s.toStop);
+  const fleet = useMemo(() => loadFleet(), []);
+
+  /* live distance between each consecutive stop (haversine estimate) */
+  const [legMiles, setLegMiles] = useState<(number | null)[]>([]);
+  useEffect(() => {
+    let off = false;
+    (async () => {
+      const rp = routingProvider();
+      const out: (number | null)[] = [];
+      for (let i = 0; i < sorted.length - 1; i++) {
+        const a = sorted[i], b = sorted[i + 1];
+        out.push(await rp.laneMiles([{ city: a.city, state: a.state, address: a.address }, { city: b.city, state: b.state, address: b.address }]));
+      }
+      if (!off) setLegMiles(out);
+    })();
+    return () => { off = true; };
+  }, [sorted]);
+
   async function rebuild(nextCuts: number[]) {
     const withSegs = { ...l, segments: buildSegments(l, nextCuts) };
     setL(await persist(proportionRevenue(await persist(withSegs))));
@@ -323,7 +310,11 @@ function StopsTab({ l, setL, persist }: { l: Load; setL: React.Dispatch<React.Se
     next[idx] = nv; await rebuild(next.sort((a, b) => a - b));
   }
   async function removeSplit() { setL(await persist({ segments: [] })); }
+  async function updSeg(i: number, patch: Partial<LoadSegment>) {
+    setL(await persist({ segments: l.segments.map((s, j) => (j === i ? { ...s, ...patch } : s)) }));
+  }
   const cutLabel = (c: number) => `#${sorted[c]?.sequence} ${[sorted[c]?.city, sorted[c]?.state].filter(Boolean).join(', ') || sorted[c]?.type || 'stop'}`;
+  const stopIdxInSorted = (s: LoadStop) => sorted.findIndex((x) => x === s);
 
   return (
     <div>
@@ -348,6 +339,9 @@ function StopsTab({ l, setL, persist }: { l: Load; setL: React.Dispatch<React.Se
             <input className="am-input" placeholder="Ref #" value={s.refNo} onChange={(e) => upd(i, 'refNo', e.target.value)} />
             <input className="am-input" placeholder="Notes" value={s.notes} onChange={(e) => upd(i, 'notes', e.target.value)} />
           </div>
+          {(() => { const si = stopIdxInSorted(s); return si >= 0 && si < sorted.length - 1
+            ? <div className="load-leg-miles" title="Estimated distance to the next stop">↓ {legMiles[si] != null ? fmtMiles(legMiles[si]) : '…'} to next stop</div>
+            : null; })()}
         </div>
       ))}
       <div className="load-stopadd">
@@ -362,45 +356,40 @@ function StopsTab({ l, setL, persist }: { l: Load; setL: React.Dispatch<React.Se
       </div>
       {l.segments.length > 0 && (
         <div className="load-split-ctl">
-          <span className="load-split-ctl-title">✂ Split into {l.segments.length} legs</span>
-          {cuts.map((c, idx) => (
-            <span key={idx} className="load-split-chip">
-              <span className="load-split-chip-lab">split after {cutLabel(c)}</span>
-              <button className="split-move" title="Move split one stop earlier" disabled={c <= 1 || cuts.some((x, j) => j !== idx && x === c - 1)} onClick={() => moveCut(idx, -1)}>▲</button>
-              <button className="split-move" title="Move split one stop later" disabled={c >= sorted.length - 2 || cuts.some((x, j) => j !== idx && x === c + 1)} onClick={() => moveCut(idx, 1)}>▼</button>
-            </span>
+          <div className="load-split-ctl-row">
+            <span className="load-split-ctl-title">✂ Split into {l.segments.length} legs</span>
+            {cuts.map((c, idx) => (
+              <span key={idx} className="load-split-chip">
+                <span className="load-split-chip-lab">split after {cutLabel(c)}</span>
+                <button className="split-move" title="Move split one stop earlier" disabled={c <= 1 || cuts.some((x, j) => j !== idx && x === c - 1)} onClick={() => moveCut(idx, -1)}>▲</button>
+                <button className="split-move" title="Move split one stop later" disabled={c >= sorted.length - 2 || cuts.some((x, j) => j !== idx && x === c + 1)} onClick={() => moveCut(idx, 1)}>▼</button>
+              </span>
+            ))}
+            {sorted.length > l.segments.length + 1 && (
+              <button className="am-clear split-add-cut" title="Add another split point" onClick={() => rebuild([...cuts, sorted.slice(1, -1).map((_, i) => i + 1).find((i) => !cuts.includes(i)) ?? cuts[cuts.length - 1]])}>＋ Cut</button>
+            )}
+            <button className="am-clear" onClick={removeSplit}>✕ Remove split</button>
+          </div>
+          {/* per-leg assignment — each segment gets its own truck / revenue / status */}
+          {l.segments.map((s, i) => (
+            <div key={s.id} className="load-split-seg">
+              <div className="load-split-seg-head">
+                <b>Leg {i + 1}</b>
+                <span className="am-muted">stops #{sorted[s.fromStop]?.sequence}→#{sorted[s.toStop]?.sequence} · {fmtMiles(s.segmentMiles)} · {fmtCpm(s.segmentCpm)}</span>
+              </div>
+              <div className="load-three">
+                <L t="Truck #">
+                  <input className="am-input" list="load-trucks-split" value={s.assignedTruck}
+                    onChange={(e) => updSeg(i, { assignedTruck: e.target.value, assignedTeamId: e.target.value })} placeholder="type a truck #" />
+                </L>
+                <L t="Leg revenue $"><input className="am-input load-rate-input" type="number" value={s.segmentRevenue ?? ''} onChange={(e) => updSeg(i, { segmentRevenue: e.target.value === '' ? null : Number(e.target.value) })} /></L>
+                <L t="Status"><select className="am-input" value={s.status} onChange={(e) => updSeg(i, { status: e.target.value })}>{STATUSES.map((x) => <option key={x} value={x}>{LOAD_STATUS_LABEL[x] ?? x}</option>)}</select></L>
+              </div>
+            </div>
           ))}
-          {sorted.length > l.segments.length + 1 && (
-            <button className="am-clear split-add-cut" title="Add another split point" onClick={() => rebuild([...cuts, sorted.slice(1, -1).map((_, i) => i + 1).find((i) => !cuts.includes(i)) ?? cuts[cuts.length - 1]])}>＋ Cut</button>
-          )}
-          <button className="am-clear" onClick={removeSplit}>✕ Remove split</button>
-          <span className="am-muted">Assign a truck to each leg on the ✂ Split tab.</span>
+          <datalist id="load-trucks-split">{fleet.map((t) => <option key={t.tractor} value={t.tractor}>{[t.driver1, t.driver2].filter(Boolean).join(' / ') || t.type}</option>)}</datalist>
         </div>
       )}
-    </div>
-  );
-}
-
-/* one driver row: name + flyer + confirmed toggles, colored by state. Yellow =
-   flyer sent / pending; light green = confirmed. Independent per driver. */
-function DriverConfRow({ n, name, warn, flyer, confirmed, optional, onName, onFlyer, onConfirm }: {
-  n: number; name: string; roster: string[]; warn: string;
-  flyer: boolean; confirmed: boolean; optional?: boolean;
-  onName: (v: string) => void; onFlyer: (v: boolean) => void; onConfirm: (v: boolean) => void;
-}) {
-  const st = driverState(flyer, confirmed);
-  const chip = st === 'confirmed' ? 'Confirmed' : st === 'pending' ? 'Pending' : (name.trim() ? 'Assigned' : '—');
-  return (
-    <div className={`drv-conf drv-conf-${st}`}>
-      <span className="drv-conf-num">D{n}</span>
-      <input className="am-input drv-conf-name" list="load-roster" value={name}
-        placeholder={optional ? 'solo? leave blank' : 'pick or type a driver…'} onChange={(e) => onName(e.target.value)} />
-      <button type="button" className={`drv-conf-btn ${flyer ? 'on-y' : ''}`} disabled={!name.trim()}
-        title="Flyer sent → pending confirmation (yellow)" onClick={() => onFlyer(!flyer)}>{flyer ? '✈ Flyer sent' : '✈ Send flyer'}</button>
-      <button type="button" className={`drv-conf-btn ${confirmed ? 'on-g' : ''}`} disabled={!name.trim()}
-        title="Driver confirmed (light green)" onClick={() => onConfirm(!confirmed)}>{confirmed ? '✓ Confirmed' : 'Confirm'}</button>
-      <span className={`drv-conf-chip ${st}`}>{chip}</span>
-      {warn && <span className="load-avail-warn">{warn}</span>}
     </div>
   );
 }
@@ -474,107 +463,6 @@ function DocsTab({ loadId }: { loadId: string }) {
           ))}
         </tbody>
       </table>
-    </div>
-  );
-}
-
-/* ---------------- Split / relay ---------------- */
-function SplitTab({ l, setL, persist }: { l: Load; setL: React.Dispatch<React.SetStateAction<Load>>; persist: (n?: Partial<Load>) => Promise<Load> }) {
-  const sorted = useMemo(() => l.stops.slice().sort((a, b) => a.sequence - b.sequence), [l.stops]);
-  const teams = useMemo(() => loadFleet(), []);
-  const [cut, setCut] = useState(1);
-  const totals = loadTotals(l);
-
-  async function splitAt(i: number) {
-    const withSegs = { ...l, segments: buildSegments(l, [i]) };
-    const priced = proportionRevenue(await persist(withSegs)); // persist recalcs segment miles
-    setL(await persist(priced));
-  }
-  async function addCutHere() {
-    const cuts = new Set(l.segments.slice(0, -1).map((s) => s.toStop)); cuts.add(cut);
-    const withSegs = { ...l, segments: buildSegments(l, [...cuts]) };
-    setL(await persist(proportionRevenue(await persist(withSegs))));
-  }
-  async function unsplit() { setL(await persist({ segments: [] })); }
-  async function updSeg(i: number, patch: Partial<LoadSegment>) {
-    const segments = l.segments.map((s, j) => (j === i ? { ...s, ...patch } : s));
-    setL(await persist({ segments }));
-  }
-
-  if (l.segments.length === 0) {
-    return (
-      <div className="load-fields" style={{ maxWidth: 560 }}>
-        <p className="am-muted" style={{ fontSize: 12.5 }}>
-          Split a load at a shuttle / relay stop so each leg runs on its own truck (e.g. a solo shipper→shuttle,
-          then a team shuttle→receiver). Revenue and miles attribute to each segment's truck.
-        </p>
-        {sorted.length < 3
-          ? <div className="load-missing">Add at least 3 stops (a shuttle/handoff between pickup and delivery) on the Stops tab first.</div>
-          : (
-            <div className="split-choose">
-              <span>✂ Split at stop:</span>
-              <select className="am-input" style={{ maxWidth: 320 }} value={cut} onChange={(e) => setCut(Number(e.target.value))}>
-                {sorted.map((s, i) => (i > 0 && i < sorted.length - 1)
-                  ? <option key={i} value={i}>#{s.sequence} {s.type} — {[s.city, s.state].filter(Boolean).join(', ') || s.address || 'stop'}</option>
-                  : null)}
-              </select>
-              <button className="am-save" onClick={() => splitAt(cut)}>Split here</button>
-            </div>
-          )}
-      </div>
-    );
-  }
-
-  return (
-    <div>
-      <div className="split-totals">
-        <Sum label="Total Revenue" val={fmtMoney(totals.revenue)} money />
-        <Sum label="Total Miles" val={fmtMiles(totals.miles)} />
-        <Sum label="Blended CPM" val={fmtCpm(totals.blendedCpm)} />
-        <Sum label="Segments" val={String(totals.segments)} />
-        <Sum label="Trucks used" val={String(totals.trucks)} />
-        <button className="am-clear" style={{ marginLeft: 'auto' }} onClick={unsplit}>↺ Un-split</button>
-      </div>
-      {l.segments.map((s, i) => (
-        <div key={s.id}>
-          <div className="split-seg">
-            <div className="split-seg-head">
-              <b>{s.label}</b>
-              <span className="am-muted">stops #{sorted[s.fromStop]?.sequence}→#{sorted[s.toStop]?.sequence}</span>
-              <span className="split-seg-cpm">{fmtMoney(s.segmentRevenue)} · {fmtMiles(s.segmentMiles)} · {fmtCpm(s.segmentCpm)}</span>
-            </div>
-            <div className="load-three">
-              <label className="otp-field"><span className="otp-field-label">Truck / team</span>
-                <select className="am-input" value={s.assignedTruck} onChange={(e) => updSeg(i, { assignedTruck: e.target.value, assignedTeamId: e.target.value })}>
-                  <option value="">— unassigned —</option>
-                  {teams.map((t) => <option key={t.tractor} value={t.tractor}>#{t.tractor} — {[t.driver1, t.driver2].filter(Boolean).join(' / ') || t.type}</option>)}
-                </select>
-              </label>
-              <label className="otp-field"><span className="otp-field-label">Segment revenue $</span>
-                <input className="am-input load-rate-input" type="number" value={s.segmentRevenue ?? ''} onChange={(e) => updSeg(i, { segmentRevenue: e.target.value === '' ? null : Number(e.target.value) })} />
-              </label>
-              <label className="otp-field"><span className="otp-field-label">Status</span>
-                <select className="am-input" value={s.status} onChange={(e) => updSeg(i, { status: e.target.value })}>
-                  {STATUSES.map((x) => <option key={x} value={x}>{x}</option>)}
-                </select>
-              </label>
-            </div>
-          </div>
-          {i < l.segments.length - 1 && <div className="split-handoff">⇄ shuttle handoff · {handoffLabel(l, i)}</div>}
-        </div>
-      ))}
-      {sorted.length - 1 - l.segments.length >= 0 && sorted.length > l.segments.length + 1 && (
-        <div className="split-choose" style={{ marginTop: 10 }}>
-          <span>Add another cut at stop:</span>
-          <select className="am-input" style={{ maxWidth: 260 }} value={cut} onChange={(e) => setCut(Number(e.target.value))}>
-            {sorted.map((s, i) => (i > 0 && i < sorted.length - 1)
-              ? <option key={i} value={i}>#{s.sequence} — {[s.city, s.state].filter(Boolean).join(', ') || 'stop'}</option>
-              : null)}
-          </select>
-          <button className="am-save" onClick={addCutHere}>＋ Cut</button>
-        </div>
-      )}
-      <p className="am-muted" style={{ fontSize: 11.5, marginTop: 8 }}>Save writes each segment onto its truck's board row. Dispatch generates a separate driver sheet per segment.</p>
     </div>
   );
 }

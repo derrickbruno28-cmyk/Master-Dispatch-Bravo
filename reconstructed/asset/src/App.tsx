@@ -8,6 +8,9 @@ import CoveredView from './views/CoveredView';
 import FleetStatusView from './views/FleetStatusView';
 import FleetMapView from './views/FleetMapView';
 import OutOfServiceView from './views/OutOfServiceView';
+import TrucksView from './views/TrucksView';
+import TrailersView from './views/TrailersView';
+import LoadsView from './views/LoadsView';
 import DriversView from './views/DriversView';
 import RolesView from './views/RolesView';
 import SettingsView from './views/SettingsView';
@@ -25,12 +28,13 @@ import { watchForUpdate } from './data/versionCheck';
    kept minimal, and driver / team / route look-ups are separate filters below
    the header (not one catch-all search box). */
 
-const APP_VERSION = '0.15.0';
+const APP_VERSION = '0.16.0';
 
-type Tab = 'matrix' | 'optimizer' | 'otp' | 'covered' | 'fleet' | 'fleet-map' | 'fleet-oos' | 'drivers' | 'roles'
+type Tab = 'matrix' | 'optimizer' | 'otp' | 'covered' | 'fleet' | 'fleet-map' | 'fleet-oos'
+  | 'trucks' | 'trailers' | 'loads' | 'drivers' | 'roles'
   | 'fin-cpm' | 'fin-customer' | 'fin-truck' | 'fin-miles' | 'integrations';
 
-interface NavItem { key: Tab; label: string; managerOnly?: boolean }
+interface NavItem { key: Tab; label: string; managerOnly?: boolean; sub?: string }
 const NAV_GROUPS: { title: string; items: NavItem[] }[] = [
   { title: 'Dispatch', items: [
     { key: 'matrix', label: '🗓 Asset Matrix' },
@@ -40,20 +44,23 @@ const NAV_GROUPS: { title: string; items: NavItem[] }[] = [
   ] },
   { title: 'People', items: [
     { key: 'drivers', label: '👤 Driver Availability' },
-    { key: 'roles', label: '🔑 Roles', managerOnly: true },
   ] },
   { title: 'Fleet', items: [
-    { key: 'fleet', label: '🚛 Fleet Status' },
+    { key: 'fleet', label: '🚛 Team Status' },
+    { key: 'trucks', label: '🚚 Trucks' },
+    { key: 'trailers', label: '🚟 Trailers' },
+    { key: 'loads', label: '📦 Loads' },
     { key: 'fleet-map', label: '🗺 Fleet Map' },
     { key: 'fleet-oos', label: '🛠 Out of Service' },
   ] },
   { title: 'Financials', items: [
     { key: 'fin-cpm', label: '💰 Revenue / CPM' },
-    { key: 'fin-customer', label: '🏷 By Customer' },
+    { key: 'fin-customer', label: '🏷 By Customer', sub: 'Reports' },
     { key: 'fin-truck', label: '🚚 By Truck / Team' },
     { key: 'fin-miles', label: '🛣 Driver Miles' },
   ] },
   { title: 'Setup', items: [
+    { key: 'roles', label: '🔑 Roles', managerOnly: true },
     { key: 'integrations', label: '🔌 Integrations' },
   ] },
 ];
@@ -112,6 +119,7 @@ export default function App() {
   const [sidebarOpen, setSidebarOpen] = useState<boolean>(() => (typeof window !== 'undefined' ? window.innerWidth > 820 : true));
   const [seedDrivers, setSeedDrivers] = useState<{ q: string; nonce: number }>({ q: '', nonce: 0 });
   const [seedFleet, setSeedFleet] = useState<{ q: string; nonce: number }>({ q: '', nonce: 0 });
+  const [navOpen, setNavOpen] = useState<Record<string, boolean>>({});
   const [, force] = useState(0);
   const [updateReady, setUpdateReady] = useState(false);
 
@@ -208,11 +216,18 @@ export default function App() {
             {NAV_GROUPS.map((g) => {
               const items = g.items.filter((it) => !it.managerOnly || showRoles);
               if (!items.length) return null;
+              const open = navOpen[g.title] ?? true;
+              const activeHere = items.some((it) => it.key === tab);
               return (
-                <div key={g.title} className="nav-group">
-                  <div className="nav-group-title">{g.title}</div>
-                  {items.map((it) => (
-                    <button key={it.key} className={`nav-item ${tab === it.key ? 'on' : ''}`} onClick={() => go(it.key)}>{it.label}</button>
+                <div key={g.title} className={`nav-group ${open ? 'open' : 'closed'}`}>
+                  <button className={`nav-group-title ${activeHere ? 'has-active' : ''}`} onClick={() => setNavOpen((p) => ({ ...p, [g.title]: !open }))}>
+                    <span className="nav-group-caret">{open ? '▾' : '▸'}</span>{g.title}
+                  </button>
+                  {open && items.map((it) => (
+                    <div key={it.key}>
+                      {it.sub && <div className="nav-subhead">{it.sub}</div>}
+                      <button className={`nav-item ${tab === it.key ? 'on' : ''}`} onClick={() => go(it.key)}>{it.label}</button>
+                    </div>
                   ))}
                 </div>
               );
@@ -227,6 +242,9 @@ export default function App() {
           {tab === 'otp' && <OTPView />}
           {tab === 'covered' && <CoveredView />}
           {tab === 'fleet' && <FleetStatusView seed={seedFleet} />}
+          {tab === 'trucks' && <TrucksView />}
+          {tab === 'trailers' && <TrailersView />}
+          {tab === 'loads' && <LoadsView />}
           {tab === 'fleet-map' && <FleetMapView />}
           {tab === 'fleet-oos' && <OutOfServiceView />}
           {tab === 'drivers' && <DriversView seed={seedDrivers} />}

@@ -64,7 +64,7 @@ export default function FleetStatusView({ seed }: { seed?: { q: string; nonce: n
   return (
     <div className="am-page">
       <div className="am-head">
-        <h2>Fleet Status</h2>
+        <h2>Team Status</h2>
         <input className="am-input" style={{ maxWidth: 220 }} placeholder="Search team / driver / city…" value={q} onChange={(e) => setQ(e.target.value)} />
         <span className="am-muted">{rows.length} of {fleet.length} teams</span>
         <span className="am-muted fleet-status-hint">Status reads live from the load on the calendar — update it on the Asset Matrix. Availability (NTB / Deadhead / Shutdown) shows when a truck has no active load.</span>

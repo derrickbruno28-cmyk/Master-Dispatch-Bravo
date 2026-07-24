@@ -24,8 +24,12 @@ const KEY = 'asset-fleet-v2';   // v2 = Houston terminal removed (#444 → SATX)
 const COL = 'assetFleet';       // shared Firestore collection (one doc per tractor)
 
 function normTruck(t: Partial<FleetTruck>): FleetTruck {
+  /* 'delivering' was retired as a team-availability status — operational status
+     now reads from the load on the calendar. Migrate any stragglers to En Route. */
+  const status = ((t.status ?? '').trim().toLowerCase() === 'delivering') ? 'En Route' : (t.status ?? '');
   return {
     ...(t as FleetTruck),
+    status,
     constraints: t.constraints ?? '',
     deadheadTo: t.deadheadTo ?? '',
     flyer: (t.flyer ?? '') as FleetTruck['flyer'],
@@ -122,7 +126,6 @@ export function teamStatusMeta(status: string): TeamStatusMeta {
     case 'shutdown': return { label: '⛔ Shutdown', color: 'var(--red)', tint: 'rgba(245,80,90,0.10)', blocks: true, onMatrix: true };
     case 'dispatched': return { label: 'Dispatched', color: 'var(--green)', onMatrix: true };
     case 'en route': return { label: 'En route', color: 'var(--accent)', onMatrix: true };
-    case 'delivering': return { label: 'Delivering', color: 'var(--amber)', onMatrix: true };
     case 'on 34hr reset': return { label: 'On 34hr reset', color: '#a78bfa', onMatrix: true };
     default: return { label: status || '—', color: 'var(--muted)', onMatrix: !!(status || '').trim() };
   }

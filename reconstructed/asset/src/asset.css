@@ -76,8 +76,16 @@
 .asset-sidebar { flex: none; width: 236px; border-right: 1px solid var(--border); background: var(--panel); overflow-y: auto; }
 .asset-shell:not(.sb-open) .asset-sidebar { display: none; }
 .asset-nav { padding: 12px 10px 24px; }
-.nav-group { margin-bottom: 14px; }
-.nav-group-title { font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.7px; color: var(--muted); padding: 4px 10px; }
+.nav-group { margin-bottom: 10px; }
+.nav-group-title {
+  display: flex; align-items: center; gap: 6px; width: 100%; text-align: left; border: none; background: transparent;
+  font: inherit; font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.7px; color: var(--muted);
+  padding: 5px 10px; cursor: pointer; border-radius: 7px;
+}
+.nav-group-title:hover { background: var(--panel-2); color: var(--text); }
+.nav-group-title.has-active { color: var(--text); }
+.nav-group-caret { font-size: 8px; width: 10px; display: inline-block; }
+.nav-subhead { font-size: 9px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.6px; color: var(--muted); padding: 6px 12px 2px; opacity: 0.75; }
 .nav-item {
   display: block; width: 100%; text-align: left; border: none; background: transparent; color: var(--muted);
   font: inherit; font-size: 13px; font-weight: 600; cursor: pointer; padding: 8px 12px; border-radius: 8px;
@@ -502,8 +510,12 @@
 /* ---- inline split control in the Stops tab (split button + movable cut) ---- */
 .load-split-btn { background: #e8590c; color: #fff; }
 .load-split-btn:disabled { opacity: 0.45; cursor: not-allowed; }
-.load-split-ctl { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 10px; padding: 9px 11px; border: 1px dashed #e8590c; border-radius: 10px; background: rgba(232,89,12,0.06); }
+.load-split-ctl { margin-top: 10px; padding: 9px 11px; border: 1px dashed #e8590c; border-radius: 10px; background: rgba(232,89,12,0.06); }
+.load-split-ctl-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .load-split-ctl-title { font-size: 12px; font-weight: 800; color: #e8590c; }
+.load-split-seg { margin-top: 9px; padding: 8px 10px; border: 1px solid var(--border); border-left: 4px solid var(--accent); border-radius: 9px; background: var(--panel); }
+.load-split-seg-head { display: flex; gap: 8px; align-items: baseline; margin-bottom: 5px; flex-wrap: wrap; }
+.load-leg-miles { margin-top: 6px; font-size: 11px; font-weight: 700; color: var(--accent); text-align: center; letter-spacing: 0.3px; }
 .load-split-chip { display: inline-flex; align-items: center; gap: 4px; background: var(--panel); border: 1px solid var(--border); border-radius: 999px; padding: 3px 6px 3px 10px; font-size: 11.5px; font-weight: 600; }
 .load-split-chip-lab { color: var(--text); }
 .split-move { border: 1px solid var(--border); background: var(--panel-2, var(--panel)); color: var(--text); border-radius: 6px; width: 20px; height: 20px; line-height: 1; font-size: 10px; cursor: pointer; padding: 0; }
@@ -532,11 +544,13 @@
 .drv-conf-chip.pending { color: #4a3808; background: #ecc94b; }
 .drv-conf-chip.confirmed { color: #12401f; background: #68d391; }
 
-/* ---- per-driver confirmation dots on the matrix cell ---- */
-.am-drvstrip { display: flex; gap: 3px; flex-wrap: wrap; margin-top: 3px; }
-.am-drvdot { font-size: 9px; font-weight: 700; border-radius: 5px; padding: 1px 5px; border: 1px solid var(--border); color: var(--muted); background: var(--panel-2, var(--panel)); }
-.am-drvdot.pd { background: #ecc94b; border-color: #d4a933; color: #4a3808; }
-.am-drvdot.cf { background: #68d391; border-color: #48bb78; color: #12401f; }
+/* ---- Loads page (date-range ledger + completion) ---- */
+.loads-filter { display: flex; gap: 10px; align-items: flex-end; flex-wrap: wrap; }
+.loads-quick { display: flex; gap: 4px; }
+.loads-quick .am-clear { padding: 6px 9px; font-size: 11.5px; }
+.loads-statussel { max-width: 150px; font-weight: 700; }
+.loads-done { opacity: 0.72; }
+.loads-donechip { font-size: 10.5px; font-weight: 800; color: #12401f; background: #68d391; border-radius: 999px; padding: 3px 10px; }
 
 .fin-kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px; margin: 6px 0 16px; }
 .fin-kpi { background: var(--panel-2, var(--panel)); border: 1px solid var(--border); border-radius: 12px; padding: 14px 16px; }
