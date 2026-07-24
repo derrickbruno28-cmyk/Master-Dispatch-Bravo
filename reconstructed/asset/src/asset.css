@@ -694,3 +694,17 @@
 .roles-row-dirty td { background: rgba(217,164,65,0.10); }
 .roles-row-dirty .am-save { box-shadow: 0 0 0 2px rgba(217,164,65,0.35); }
 .roles-saved { font-size: 12px; font-weight: 700; color: var(--green); }
+
+/* Create Load — in-card assignment section (new/unassigned loads) */
+.load-assign-box { border: 1px dashed var(--accent); border-radius: 9px; padding: 9px 11px; margin-bottom: 8px; background: rgba(217,164,65,0.06); }
+.load-assign-title { font-size: 12px; font-weight: 800; margin-bottom: 4px; }
+
+/* Unassigned-loads tray on the Asset Matrix */
+.am-unassigned { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; margin-top: 8px; padding: 8px 10px; border: 1px solid rgba(217,164,65,0.35); background: rgba(217,164,65,0.07); border-radius: 10px; }
+.am-unassigned-h { font-size: 12px; font-weight: 700; color: var(--amber); }
+.am-unassigned-chip { border: 1px solid var(--border); background: var(--panel-2); color: var(--text); font: inherit; font-size: 12px; font-weight: 600; padding: 4px 10px; border-radius: 999px; cursor: pointer; }
+.am-unassigned-chip:hover { border-color: var(--accent); box-shadow: 0 0 0 2px rgba(217,164,65,0.25); }
+
+/* Fleet Status — calendar-derived status */
+.fleet-status-hint { font-size: 11px; max-width: 520px; line-height: 1.4; }
+.fleet-status-src { font-size: 10px; font-weight: 600; }

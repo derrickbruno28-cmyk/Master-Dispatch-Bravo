@@ -8,6 +8,7 @@ import { getOptions, addOption, type OptionKind } from '../data/optionsStore';
 import { canDelete } from '../data/permStore';
 import { onChange } from '../data/bus';
 import { useEffect } from 'react';
+import { loadAssignments, currentLoadStatus, LOAD_STATUS_COLOR, LOAD_STATUS_LABEL, type Assignment } from '../data/schedule';
 
 /* Fleet Status = the team admin console. Add / edit / remove teams. Driver names
    autofill from the Master Drivers List; the Type / Home terminal / Status
@@ -34,6 +35,7 @@ function crossCityPickup(driver1: string, driver2: string): { c1: string; c2: st
 
 export default function FleetStatusView({ seed }: { seed?: { q: string; nonce: number } } = {}) {
   const [fleet, setFleet] = useState<FleetTruck[]>(() => loadFleet());
+  const [assign, setAssign] = useState<Record<string, Assignment>>(() => loadAssignments());
   const [q, setQ] = useState('');
 
   /* global search can jump here pre-filtered to a team */
@@ -43,8 +45,9 @@ export default function FleetStatusView({ seed }: { seed?: { q: string; nonce: n
   const [confirmDel, setConfirmDel] = useState<string | null>(null);
   const [canDel, setCanDel] = useState<boolean>(() => canDelete());
 
-  /* keep delete access + roster in sync (role switch / driver home-city edits) */
-  useEffect(() => onChange(() => { setFleet(loadFleet()); setCanDel(canDelete()); }), []);
+  /* keep delete access + roster + live calendar in sync (role switch / driver
+     home-city edits / a load status changed on the Asset Matrix) */
+  useEffect(() => onChange(() => { setFleet(loadFleet()); setAssign(loadAssignments()); setCanDel(canDelete()); }), []);
 
   const rows = useMemo(() => {
     const n = q.trim().toLowerCase();
@@ -64,6 +67,7 @@ export default function FleetStatusView({ seed }: { seed?: { q: string; nonce: n
         <h2>Fleet Status</h2>
         <input className="am-input" style={{ maxWidth: 220 }} placeholder="Search team / driver / city…" value={q} onChange={(e) => setQ(e.target.value)} />
         <span className="am-muted">{rows.length} of {fleet.length} teams</span>
+        <span className="am-muted fleet-status-hint">Status reads live from the load on the calendar — update it on the Asset Matrix. Availability (NTB / Deadhead / Shutdown) shows when a truck has no active load.</span>
         <button className="am-save fleet-add" onClick={() => { setEditing(blankTruck()); setIsNew(true); }}>＋ Add Team</button>
       </div>
 
@@ -87,7 +91,16 @@ export default function FleetStatusView({ seed }: { seed?: { q: string; nonce: n
                 <td>{TERMINAL_LABELS[t.homeCity] ?? t.homeCity}</td>
                 <td className="am-muted">{t.currentCity}</td>
                 <td style={{ color: t.hoursAvail === 0 ? 'var(--red)' : t.hoursAvail < 20 ? 'var(--amber)' : 'var(--green)' }}>{t.hoursAvail}</td>
-                <td><span className="am-pill" style={{ color: teamStatusMeta(t.status).color }}>{teamStatusMeta(t.status).label}</span></td>
+                <td>{(() => {
+                  const cal = currentLoadStatus(t.tractor, assign);
+                  if (cal) return (
+                    <span className="am-pill" style={{ color: LOAD_STATUS_COLOR[cal.status] ?? 'var(--muted)' }}
+                      title={`From the calendar — ${cal.route}${cal.date ? ` (${cal.date})` : ''}. Change it on the Asset Matrix.`}>
+                      {LOAD_STATUS_LABEL[cal.status] ?? cal.status}<span className="am-muted fleet-status-src"> · calendar</span>
+                    </span>
+                  );
+                  return <span className="am-pill" style={{ color: teamStatusMeta(t.status).color }} title="Availability status — no active load on the calendar">{teamStatusMeta(t.status).label}</span>;
+                })()}</td>
                 <td className="fleet-constraints">{t.constraints || <span className="am-muted">—</span>}</td>
                 <td className="fleet-actions">
                   {confirmDel === t.tractor ? (
@@ -170,7 +183,7 @@ function TruckEditor({ truck, isNew, onSave, onCancel }: { truck: FleetTruck; is
           <L t="Home terminal"><OptSelect kind="terminal" value={t.homeCity} onChange={(v) => f('homeCity', v)} /></L>
           <L t="Current city (empty / standby location)"><input className="am-input" value={t.currentCity} onChange={(e) => f('currentCity', e.target.value.toUpperCase())} /></L>
           <L t="Hours available"><input className="am-input" type="number" value={t.hoursAvail} onChange={(e) => f('hoursAvail', Number(e.target.value))} /></L>
-          <L t="Team status (NTB = needs load · Deadhead · Shutdown blocks dispatch · shows on the Matrix)"><OptSelect kind="status" value={t.status} onChange={(v) => f('status', v)} /></L>
+          <L t="Availability (NTB = needs load · Deadhead · Shutdown blocks dispatch). Operational status — At Shipper, En Route, Delivered — now comes from the load on the calendar."><OptSelect kind="status" value={t.status} onChange={(v) => f('status', v)} /></L>
           {t.status.trim().toLowerCase() === 'deadhead' && (
             <L t="Deadhead to (hub / city — feeds the Route Optimizer's next-load launch point)">
               <OptSelect kind="deadhead" value={t.deadheadTo || ''} onChange={(v) => f('deadheadTo', v)} />

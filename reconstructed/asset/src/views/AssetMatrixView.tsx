@@ -49,9 +49,9 @@ export default function AssetMatrixView() {
   const [assign, setAssign] = useState<Record<string, Assignment>>(() => { ensureSeed(); return loadAssignments(); });
   const [editing, setEditing] = useState<string | null>(null);
   const [editTab, setEditTab] = useState<'info' | 'dispatch' | undefined>(undefined);
-  const [creating, setCreating] = useState(false);
-  const [newTruck, setNewTruck] = useState('');
-  const [newDay, setNewDay] = useState(0);
+  const [createNew, setCreateNew] = useState(false);
+  const [placing, setPlacing] = useState<Load | null>(null);   // an unassigned load being placed on the board
+  const [loadsTick, setLoadsTick] = useState(0);               // bump to recompute load-derived views
   const [docCounts, setDocCounts] = useState<Record<string, number>>({});
   const [termFilter, setTermFilter] = useState<string>('ALL');
   const [posFilter, setPosFilter] = useState<string>('ALL');
@@ -78,8 +78,31 @@ export default function AssetMatrixView() {
   }
   useEffect(() => {
     refreshOos(); refreshHos();
-    return onChange(() => { setFleet(loadFleet()); setAssign(loadAssignments()); setCanDel(canDelete()); refreshOos(); refreshHos(); });
+    return onChange(() => { setFleet(loadFleet()); setAssign(loadAssignments()); setCanDel(canDelete()); setLoadsTick((n) => n + 1); refreshOos(); refreshHos(); });
   }, []);
+
+  /* loads created without a truck live here until placed on the board */
+  const unassignedLoads = useMemo(
+    () => loadAll().filter((l) => !l.assignedTruck.trim() && l.segments.length === 0),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [loadsTick, editing, createNew, placing],
+  );
+
+  /* place a just-saved new/unassigned load: write its board cell if it has a
+     truck + date, otherwise leave it in the Unassigned tray */
+  function commitNewLoad(saved: Load) {
+    setCreateNew(false); setPlacing(null);
+    if (saved.assignedTruck.trim() && saved.date) {
+      const k = cellKey(saved.assignedTruck, saved.date);
+      const a: Assignment = { route: saved.routeName, status: saved.status, usps: saved.uspsContract };
+      setAssign((prev) => ({ ...prev, [k]: a }));
+      void setAssignment(saved.assignedTruck, saved.date, a);
+      flash(`✓ Load created on #${saved.assignedTruck} · ${saved.date}`);
+    } else {
+      flash('✓ Load saved to the Unassigned tray — assign a truck to place it on the board.');
+    }
+    setLoadsTick((n) => n + 1);
+  }
 
   /* rich-load index (cell → Load) + 📎 doc counts for the chips */
   const loadsByCell = useMemo(() => {
@@ -178,18 +201,16 @@ export default function AssetMatrixView() {
             {positions.map((p) => <option key={p} value={p}>{p}</option>)}
           </select>
           <span className="am-muted">{weekTotal} assigned this week</span>
-          <button className="am-save fleet-add" onClick={() => { setCreating((c) => !c); setNewTruck(fleet[0]?.tractor ?? ''); }}>➕ Create Load</button>
+          <button className="am-save fleet-add" onClick={() => setCreateNew(true)}>➕ Create Load</button>
         </div>
-        {creating && (
-          <div className="load-create-row">
-            <select className="am-input" value={newTruck} onChange={(e) => setNewTruck(e.target.value)}>
-              {fleet.map((t) => <option key={t.tractor} value={t.tractor}>#{t.tractor} — {[t.driver1, t.driver2].filter(Boolean).join(' / ') || t.type}</option>)}
-            </select>
-            <select className="am-input" value={newDay} onChange={(e) => setNewDay(Number(e.target.value))}>
-              {DAYS.map((d, i) => <option key={d} value={i}>{d} {dates[i]?.slice(5)}</option>)}
-            </select>
-            <button className="am-save" disabled={!newTruck} onClick={() => { setEditing(cellKey(newTruck, dates[newDay])); setEditTab('info'); setCreating(false); }}>Open load</button>
-            <button className="am-cancel" onClick={() => setCreating(false)}>✕</button>
+        {unassignedLoads.length > 0 && (
+          <div className="am-unassigned">
+            <span className="am-unassigned-h">📥 Unassigned loads ({unassignedLoads.length}) — assign a truck to place on the board:</span>
+            {unassignedLoads.map((l) => (
+              <button key={l.id} className="am-unassigned-chip" title="Open to assign a truck + date" onClick={() => setPlacing(l)}>
+                {l.routeName || 'Untitled load'}{l.customerName ? ` · ${l.customerName}` : ''}
+              </button>
+            ))}
           </div>
         )}
         <div className="am-legend">
@@ -257,6 +278,25 @@ export default function AssetMatrixView() {
           />
         );
       })()}
+
+      {/* Create Load → a blank card straight away (no truck/date gate). Assign a
+          truck inside the card, or leave it unassigned to place from the tray. */}
+      {createNew && (
+        <LoadDetailModal
+          tractor="" date={isoDate(new Date())} canDel={canDel} initialTab="info" newLoad
+          onSave={() => {}} onClear={() => {}}
+          onCreated={commitNewLoad}
+          onClose={() => setCreateNew(false)}
+        />
+      )}
+      {placing && (
+        <LoadDetailModal
+          tractor={placing.assignedTruck} date={placing.date} canDel={canDel} initialTab="info" seedLoad={placing}
+          onSave={() => {}} onClear={() => {}}
+          onCreated={commitNewLoad}
+          onClose={() => setPlacing(null)}
+        />
+      )}
     </div>
   );
 }

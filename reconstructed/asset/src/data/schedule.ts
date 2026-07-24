@@ -59,6 +59,40 @@ export function ensureSeed() {
 
 export function loadAssignments(): Record<string, Assignment> { return readLocal(); }
 
+/* ---- load-status vocabulary (the ONE source; the Matrix cell + the Fleet
+   Status page both read these so a truck's operational status never disagrees
+   with the calendar) ---- */
+export const LOAD_STATUSES = ['open', 'covered', 'dispatched', 'at yard', 'at shipper', 'en route', 'at receiver', 'delivered', 'completed', 'off'] as const;
+export const LOAD_STATUS_COLOR: Record<string, string> = {
+  open: 'var(--muted)', covered: 'var(--green)', dispatched: '#00b8d4',
+  'at yard': '#b0842a', 'at shipper': '#e8a33d', 'en route': 'var(--accent)',
+  'at receiver': '#7c5cff', delivered: '#6b7f9e', completed: '#a78bfa', off: 'var(--panel-2)',
+};
+export const LOAD_STATUS_LABEL: Record<string, string> = {
+  open: 'Open', covered: 'Covered', dispatched: 'Dispatched',
+  'at shipper': 'At Shipper', 'at yard': 'At Yard', 'en route': 'En Route',
+  'at receiver': 'At Receiver', delivered: 'Delivered', completed: 'Completed', off: 'Off / Home',
+};
+
+/* A truck's LIVE operational status, read straight from the calendar: today's
+   load wins; otherwise the most recent still-in-progress load (not delivered /
+   completed / off). Returns null when the truck has no active calendar load — the
+   Fleet Status page then falls back to the team's availability status. */
+export function currentLoadStatus(tractor: string, assign?: Record<string, Assignment>): { route: string; status: string; date: string } | null {
+  const map = assign ?? readLocal();
+  const today = isoDate(new Date());
+  const todayA = map[cellKey(tractor, today)];
+  if (todayA && todayA.route.trim()) return { route: todayA.route, status: todayA.status, date: today };
+  const DONE = new Set(['delivered', 'completed', 'off']);
+  let best: { route: string; status: string; date: string } | null = null;
+  for (const [k, a] of Object.entries(map)) {
+    const { tractor: tr, date } = parseCellKey(k);
+    if (tr !== tractor || !a.route.trim() || DONE.has(a.status) || date > today) continue;
+    if (!best || date > best.date) best = { route: a.route, status: a.status, date };
+  }
+  return best;
+}
+
 /* Single write path. Updates the browser copy (demo) and, when live, the shared
    Firestore collection + Bravo mirror. Pass a null/blank assignment to clear. */
 export async function setAssignment(tractor: string, date: string, a: Assignment | null) {

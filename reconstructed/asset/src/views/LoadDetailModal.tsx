@@ -23,11 +23,14 @@ const STATUSES = ['open', 'covered', 'dispatched', 'at yard', 'at shipper', 'en 
 
 type Tab = 'info' | 'stops' | 'customer' | 'docs' | 'split' | 'dispatch';
 
-export default function LoadDetailModal({ tractor, date, assignment, canDel, initialTab, warning, onSave, onClear, onClose }: {
+export default function LoadDetailModal({ tractor, date, assignment, canDel, initialTab, warning, newLoad, seedLoad, onSave, onClear, onCreated, onClose }: {
   tractor: string; date: string; assignment?: Assignment; canDel: boolean; initialTab?: Tab; warning?: string;
-  onSave: (a: Assignment) => void; onClear: () => void; onClose: () => void;
+  newLoad?: boolean; seedLoad?: Load;
+  onSave: (a: Assignment) => void; onClear: () => void; onCreated?: (l: Load) => void; onClose: () => void;
 }) {
   const [l, setL] = useState<Load>(() => {
+    if (seedLoad) return seedLoad;
+    if (newLoad) return blankLoad('', date);   // blank, unassigned — truck/date set inside the card
     const ex = loadForCell(tractor, date);
     if (ex) return ex;
     return blankLoad(tractor, date, assignment ? { routeName: assignment.route, status: assignment.status, uspsContract: assignment.usps } : {});
@@ -67,7 +70,7 @@ export default function LoadDetailModal({ tractor, date, assignment, canDel, ini
   }
   async function saveAndClose() {
     if (verify) { setNotice('⚠ Verify the auto-filled fields, then click “✓ Verified” before saving.'); setTab('info'); return; }
-    if (!l.routeName.trim()) { setNotice('Route name is required to place the load on the board.'); setTab('info'); return; }
+    if (!l.routeName.trim()) { setNotice('Route name is required to save the load.'); setTab('info'); return; }
     const saved = await persist();
     if (saved.segments.length > 0) {
       /* split load: write a board cell per segment truck (and clear dropped ones) */
@@ -76,6 +79,9 @@ export default function LoadDetailModal({ tractor, date, assignment, canDel, ini
       onClose();
       return;
     }
+    /* new load: the card owns its own truck + date. The parent places it on the
+       board if a truck is assigned, or keeps it in the Unassigned tray if not. */
+    if (newLoad || seedLoad) { onCreated?.(saved); return; }
     onSave({ route: saved.routeName, status: saved.status, usps: saved.uspsContract });
   }
 
@@ -85,7 +91,7 @@ export default function LoadDetailModal({ tractor, date, assignment, canDel, ini
         {/* header: title + summary strip + actions */}
         <div className="load-head">
           <div>
-            <h3>{l.routeName.trim() || 'New Load'} <span className="am-muted">· #{tractor} · {date}</span></h3>
+            <h3>{l.routeName.trim() || 'New Load'} <span className="am-muted">· {l.assignedTruck ? `#${l.assignedTruck}` : 'unassigned'} · {l.date || '—'}</span></h3>
             <div className="load-summary">
               <Sum label="Rate / Revenue" val={fmtMoney(l.rate)} money />
               <Sum label="Distance" val={fmtMiles(l.laneMiles)} />
@@ -125,7 +131,7 @@ export default function LoadDetailModal({ tractor, date, assignment, canDel, ini
           </div>
         )}
 
-        {tab === 'info' && <InfoTab l={l} f={f} canDel={canDel} autoFilled={autoFilled} onRateCon={onRateCon} onClear={() => { clearLoadCell(tractor, date); onClear(); }} />}
+        {tab === 'info' && <InfoTab l={l} f={f} canDel={canDel} assignable={!!(newLoad || seedLoad)} autoFilled={autoFilled} onRateCon={onRateCon} onClear={() => { clearLoadCell(tractor, date); onClear(); }} />}
         {tab === 'stops' && <StopsTab l={l} setL={setL} />}
         {tab === 'customer' && <CustomerTab l={l} f={f} />}
         {tab === 'docs' && <DocsTab loadId={l.id} />}
@@ -160,11 +166,12 @@ function Sum({ label, val, money }: { label: string; val: string; money?: boolea
 }
 
 /* ---------------- Load Info ---------------- */
-function InfoTab({ l, f, canDel, autoFilled, onRateCon, onClear }: {
-  l: Load; f: <K extends keyof Load>(k: K, v: Load[K]) => void; canDel: boolean;
+function InfoTab({ l, f, canDel, assignable, autoFilled, onRateCon, onClear }: {
+  l: Load; f: <K extends keyof Load>(k: K, v: Load[K]) => void; canDel: boolean; assignable?: boolean;
   autoFilled: Set<string>; onRateCon: (file: File) => void | Promise<void>; onClear: () => void;
 }) {
   const customers = useMemo(() => loadCustomers(), []);
+  const fleet = useMemo(() => loadFleet(), []);
   const [confirmClear, setConfirmClear] = useState(false);
   const [drag, setDrag] = useState(false);
   const hl = (k: string) => `am-input${autoFilled.has(k) ? ' load-autofilled' : ''}`;
@@ -180,6 +187,20 @@ function InfoTab({ l, f, canDel, autoFilled, onRateCon, onClear }: {
             <input type="file" accept="application/pdf,.pdf,.txt" style={{ display: 'none' }} onChange={(e) => { const fl = e.target.files?.[0]; if (fl) void onRateCon(fl); e.target.value = ''; }} />
           </label>
         </div>
+        {assignable && (
+          <div className="load-assign-box">
+            <div className="load-assign-title">Assignment <span className="am-muted">— fill the load in first; assign a truck when you're ready (or leave it unassigned to place later).</span></div>
+            <div className="load-two">
+              <L t="Assign to truck">
+                <select className="am-input" value={l.assignedTruck} onChange={(e) => { f('assignedTruck', e.target.value); f('assignedTeamId', e.target.value); }}>
+                  <option value="">— Unassigned (place later) —</option>
+                  {fleet.map((t) => <option key={t.tractor} value={t.tractor}>#{t.tractor} — {[t.driver1, t.driver2].filter(Boolean).join(' / ') || t.type}</option>)}
+                </select>
+              </L>
+              <L t="Board date"><input className="am-input" type="date" value={l.date} onChange={(e) => f('date', e.target.value)} /></L>
+            </div>
+          </div>
+        )}
         <L t="Route name *"><input className={hl('routeName')} value={l.routeName} onChange={(e) => f('routeName', e.target.value)} placeholder="FA2D3-544 Irving→SATX" /></L>
         <div className="load-two">
           <L t="Customer *">
@@ -205,15 +226,17 @@ function InfoTab({ l, f, canDel, autoFilled, onRateCon, onClear }: {
         <L t="Commodity"><input className={hl('commodity')} value={l.commodity} onChange={(e) => f('commodity', e.target.value)} /></L>
         <L t="Dispatch notes"><textarea className="am-input" rows={2} value={l.dispatchNotes} onChange={(e) => f('dispatchNotes', e.target.value)} /></L>
         <label className="am-usps-check"><input type="checkbox" checked={l.uspsContract} onChange={(e) => f('uspsContract', e.target.checked)} /> USPS contract route</label>
-        <div className="load-clear-row">
-          {confirmClear
-            ? <><span className="am-muted">Remove this load from the board?</span>
-                <button className="fleet-del" onClick={onClear}>✓ Remove</button>
-                <button className="am-clear" onClick={() => setConfirmClear(false)}>Keep</button></>
-            : canDel
-              ? <button className="am-clear" onClick={() => setConfirmClear(true)}>🗑 Clear load off this day</button>
-              : <button className="am-clear" disabled title="Deleting is restricted to FMT Lead / US Ops / Owner">🔒 Clear (restricted)</button>}
-        </div>
+        {!assignable && (
+          <div className="load-clear-row">
+            {confirmClear
+              ? <><span className="am-muted">Remove this load from the board?</span>
+                  <button className="fleet-del" onClick={onClear}>✓ Remove</button>
+                  <button className="am-clear" onClick={() => setConfirmClear(false)}>Keep</button></>
+              : canDel
+                ? <button className="am-clear" onClick={() => setConfirmClear(true)}>🗑 Clear load off this day</button>
+                : <button className="am-clear" disabled title="Deleting is restricted to FMT Lead / US Ops / Owner">🔒 Clear (restricted)</button>}
+          </div>
+        )}
       </div>
       <StopsPanel l={l} highlight={autoFilled.has('stops')} />
     </div>
