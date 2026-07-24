@@ -29,7 +29,7 @@ import { watchForUpdate } from './data/versionCheck';
    kept minimal, and driver / team / route look-ups are separate filters below
    the header (not one catch-all search box). */
 
-const APP_VERSION = '0.19.0';
+const APP_VERSION = '0.20.0';
 
 type Tab = 'matrix' | 'optimizer' | 'otp' | 'covered' | 'repo' | 'fleet' | 'fleet-map' | 'fleet-oos'
   | 'trucks' | 'trailers' | 'loads' | 'drivers' | 'roles'
