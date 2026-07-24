@@ -82,14 +82,14 @@ export function loadAssignments(): Record<string, Assignment> { return cache; }
 /* ---- load-status vocabulary (the ONE source; the Matrix cell + the Fleet
    Status page both read these so a truck's operational status never disagrees
    with the calendar) ---- */
-export const LOAD_STATUSES = ['open', 'covered', 'dispatched', 'at yard', 'at shipper', 'en route', 'at receiver', 'delivered', 'completed', 'off'] as const;
+export const LOAD_STATUSES = ['unassigned', 'open', 'covered', 'dispatched', 'at yard', 'at shipper', 'en route', 'at receiver', 'delivered', 'completed', 'off'] as const;
 export const LOAD_STATUS_COLOR: Record<string, string> = {
-  open: 'var(--muted)', covered: 'var(--green)', dispatched: '#00b8d4',
+  unassigned: 'var(--muted)', open: 'var(--muted)', covered: 'var(--green)', dispatched: '#00b8d4',
   'at yard': '#b0842a', 'at shipper': '#e8a33d', 'en route': 'var(--accent)',
   'at receiver': '#7c5cff', delivered: '#6b7f9e', completed: '#a78bfa', off: 'var(--panel-2)',
 };
 export const LOAD_STATUS_LABEL: Record<string, string> = {
-  open: 'Open', covered: 'Covered', dispatched: 'Dispatched',
+  unassigned: 'Unassigned', open: 'Open', covered: 'Covered', dispatched: 'Dispatched',
   'at shipper': 'At Shipper', 'at yard': 'At Yard', 'en route': 'En Route',
   'at receiver': 'At Receiver', delivered: 'Delivered', completed: 'Completed', off: 'Off / Home',
 };

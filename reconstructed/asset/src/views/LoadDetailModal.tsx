@@ -6,12 +6,13 @@ import {
   buildSegments, proportionRevenue, loadTotals, handoffLabel, syncSegmentAssignments, loadTrucks,
   fmtMoney, fmtMiles, fmtCpm, type Load, type LoadStop, type LoadSegment, blankStop,
 } from '../data/loadsStore';
-import { loadCustomers, ensureCustomer, LOAD_TYPES, EQUIPMENT_TYPES } from '../data/customersStore';
+import { loadCustomers, ensureCustomer, EQUIPMENT_TYPES } from '../data/customersStore';
 import { loadFleet, saveTruck } from '../data/fleetStore';
+import { driverNames, driverByName } from '../data/driversStore';
 import { documentStore, type LoadDocument } from '../integrations/documents';
 import { routingProvider } from '../integrations/routing';
 import { rateConParser, applyRateCon } from '../integrations/ratecon';
-import type { Assignment } from '../data/schedule';
+import { LOAD_STATUS_LABEL, type Assignment } from '../data/schedule';
 
 /* Load Detail modal — replaces the old 3-field inline cell editor. Tabbed shell
    (Load Info · Stops · Customer · Documents · Dispatch) over the rich Load
@@ -19,9 +20,15 @@ import type { Assignment } from '../data/schedule';
    existing views stay in sync. Only the * fields block dispatch — everything
    else can stay blank. */
 
-const STATUSES = ['open', 'covered', 'dispatched', 'at yard', 'at shipper', 'en route', 'at receiver', 'delivered', 'completed', 'off'];
+const STATUSES = ['unassigned', 'open', 'covered', 'dispatched', 'at yard', 'at shipper', 'en route', 'at receiver', 'delivered', 'completed', 'off'];
 
-type Tab = 'info' | 'stops' | 'customer' | 'docs' | 'split' | 'dispatch';
+type Tab = 'info' | 'stops' | 'docs' | 'split' | 'dispatch';
+
+/* per-driver dispatch state → color: confirmed = light green, flyer-sent-but-not-
+   confirmed = yellow (pending), otherwise just assigned */
+function driverState(flyer: boolean, confirmed: boolean): 'confirmed' | 'pending' | 'assigned' {
+  return confirmed ? 'confirmed' : flyer ? 'pending' : 'assigned';
+}
 
 export default function LoadDetailModal({ tractor, date, assignment, canDel, initialTab, warning, newLoad, seedLoad, onSave, onClear, onCreated, onClose }: {
   tractor: string; date: string; assignment?: Assignment; canDel: boolean; initialTab?: Tab; warning?: string;
@@ -70,7 +77,10 @@ export default function LoadDetailModal({ tractor, date, assignment, canDel, ini
   }
   async function saveAndClose() {
     if (verify) { setNotice('⚠ Verify the auto-filled fields, then click “✓ Verified” before saving.'); setTab('info'); return; }
-    if (!l.routeName.trim()) { setNotice('Route name is required to save the load.'); setTab('info'); return; }
+    /* new/unassigned loads can be saved with NO route — the point is to start the
+       schedule entry with a truck + drivers + date and fill the rest in later.
+       Existing (cell-bound) loads still need a route to stay on the board. */
+    if (!(newLoad || seedLoad) && !l.routeName.trim()) { setNotice('Route name is required to save the load.'); setTab('info'); return; }
     const saved = await persist();
     if (saved.segments.length > 0) {
       /* split load: write a board cell per segment truck (and clear dropped ones) */
@@ -109,7 +119,7 @@ export default function LoadDetailModal({ tractor, date, assignment, canDel, ini
 
         {/* tabs */}
         <div className="load-tabs">
-          {([['info', 'Load Info'], ['stops', 'Stops'], ['customer', 'Customer'], ['docs', 'Documents'], ['split', l.segments.length ? `✂ Split (${l.segments.length})` : '✂ Split'], ['dispatch', 'Dispatch']] as [Tab, string][]).map(([k, lab]) => (
+          {([['info', 'Load Info'], ['stops', 'Stops'], ['docs', 'Documents'], ['split', l.segments.length ? `✂ Split (${l.segments.length})` : '✂ Split'], ['dispatch', 'Dispatch']] as [Tab, string][]).map(([k, lab]) => (
             <button key={k} className={`load-tab ${tab === k ? 'on' : ''}`} onClick={() => setTab(k)}>{lab}</button>
           ))}
         </div>
@@ -132,8 +142,7 @@ export default function LoadDetailModal({ tractor, date, assignment, canDel, ini
         )}
 
         {tab === 'info' && <InfoTab l={l} f={f} canDel={canDel} assignable={!!(newLoad || seedLoad)} autoFilled={autoFilled} onRateCon={onRateCon} onClear={() => { clearLoadCell(tractor, date); onClear(); }} />}
-        {tab === 'stops' && <StopsTab l={l} setL={setL} />}
-        {tab === 'customer' && <CustomerTab l={l} f={f} />}
+        {tab === 'stops' && <StopsTab l={l} setL={setL} persist={persist} />}
         {tab === 'docs' && <DocsTab loadId={l.id} />}
         {tab === 'split' && <SplitTab l={l} setL={setL} persist={persist} />}
         {tab === 'dispatch' && (
@@ -172,9 +181,21 @@ function InfoTab({ l, f, canDel, assignable, autoFilled, onRateCon, onClear }: {
 }) {
   const customers = useMemo(() => loadCustomers(), []);
   const fleet = useMemo(() => loadFleet(), []);
+  const roster = useMemo(() => driverNames(), []);
   const [confirmClear, setConfirmClear] = useState(false);
   const [drag, setDrag] = useState(false);
   const hl = (k: string) => `am-input${autoFilled.has(k) ? ' load-autofilled' : ''}`;
+  /* driver-availability check against the board date */
+  function availWarn(name: string): string {
+    const d = driverByName(name); if (!d || !d.readyDate || !l.date) return '';
+    if (l.date < d.readyDate) return `⚠ ${(name.split(' ')[0] || name)} isn't available until ${d.readyDate} (ready-to-go date)`;
+    return '';
+  }
+  function pickTruck(v: string) {
+    f('assignedTruck', v); f('assignedTeamId', v);
+    const t = fleet.find((x) => x.tractor === v);
+    if (t) { if (!l.driver1) f('driver1', t.driver1 || ''); if (!l.driver2) f('driver2', t.driver2 || ''); }
+  }
   return (
     <div className="load-info-grid">
       <div className="load-fields">
@@ -189,32 +210,34 @@ function InfoTab({ l, f, canDel, assignable, autoFilled, onRateCon, onClear }: {
         </div>
         {assignable && (
           <div className="load-assign-box">
-            <div className="load-assign-title">Assignment <span className="am-muted">— fill the load in first; assign a truck when you're ready (or leave it unassigned to place later).</span></div>
+            <div className="load-assign-title">Assignment <span className="am-muted">— start the schedule entry: pick the team, truck &amp; trailer and a date. You can save with no route and fill the rest in later.</span></div>
             <div className="load-two">
               <L t="Assign to truck">
-                <select className="am-input" value={l.assignedTruck} onChange={(e) => { f('assignedTruck', e.target.value); f('assignedTeamId', e.target.value); }}>
+                <select className="am-input" value={l.assignedTruck} onChange={(e) => pickTruck(e.target.value)}>
                   <option value="">— Unassigned (place later) —</option>
                   {fleet.map((t) => <option key={t.tractor} value={t.tractor}>#{t.tractor} — {[t.driver1, t.driver2].filter(Boolean).join(' / ') || t.type}</option>)}
                 </select>
               </L>
-              <L t="Board date"><input className="am-input" type="date" value={l.date} onChange={(e) => f('date', e.target.value)} /></L>
+              <L t="Trailer #"><input className="am-input" value={l.assignedTrailer} onChange={(e) => f('assignedTrailer', e.target.value)} placeholder="e.g. 53012" /></L>
             </div>
+            <L t="Board date (pickup day)"><input className="am-input" type="date" value={l.date} onChange={(e) => f('date', e.target.value)} /></L>
           </div>
         )}
         <L t="Route name *"><input className={hl('routeName')} value={l.routeName} onChange={(e) => f('routeName', e.target.value)} placeholder="FA2D3-544 Irving→SATX" /></L>
         <div className="load-two">
-          <L t="Customer *">
+          <L t="Customer">
             <input className={hl('customerName')} list="load-customers" value={l.customerName} onChange={(e) => f('customerName', e.target.value)} placeholder="pick or type…" />
             <datalist id="load-customers">{customers.map((c) => <option key={c.id} value={c.name} />)}</datalist>
           </L>
-          <L t="Load type *"><select className="am-input" value={l.loadType} onChange={(e) => f('loadType', e.target.value)}>{LOAD_TYPES.map((t) => <option key={t}>{t}</option>)}</select></L>
+          <L t="Status">
+            <select className="am-input" value={l.status} onChange={(e) => f('status', e.target.value)}>
+              {STATUSES.map((s) => <option key={s} value={s}>{LOAD_STATUS_LABEL[s] ?? s}</option>)}
+            </select>
+          </L>
         </div>
-        <div className="load-two">
-          <L t="Equipment (van type) *"><select className={hl('equipment')} value={l.equipment} onChange={(e) => f('equipment', e.target.value)}>
-            <option value="">— select —</option>{EQUIPMENT_TYPES.map((t) => <option key={t}>{t}</option>)}
-          </select></L>
-          <L t="Status"><select className="am-input" value={l.status} onChange={(e) => f('status', e.target.value)}>{STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}</select></L>
-        </div>
+        <L t="Equipment (van type) *"><select className={hl('equipment')} value={l.equipment} onChange={(e) => f('equipment', e.target.value)}>
+          <option value="">— select —</option>{EQUIPMENT_TYPES.map((t) => <option key={t}>{t}</option>)}
+        </select></L>
         <div className="load-two">
           <L t="Rate (revenue $)"><input className={`${hl('rate')} load-rate-input`} type="number" value={l.rate ?? ''} onChange={(e) => f('rate', e.target.value === '' ? null : Number(e.target.value))} placeholder="0.00" /></L>
           <L t="Weight"><input className={hl('weight')} value={l.weight} onChange={(e) => f('weight', e.target.value)} placeholder="e.g. 24,000 lbs" /></L>
@@ -226,6 +249,19 @@ function InfoTab({ l, f, canDel, assignable, autoFilled, onRateCon, onClear }: {
         <L t="Commodity"><input className={hl('commodity')} value={l.commodity} onChange={(e) => f('commodity', e.target.value)} /></L>
         <L t="Dispatch notes"><textarea className="am-input" rows={2} value={l.dispatchNotes} onChange={(e) => f('dispatchNotes', e.target.value)} /></L>
         <label className="am-usps-check"><input type="checkbox" checked={l.uspsContract} onChange={(e) => f('uspsContract', e.target.checked)} /> USPS contract route</label>
+
+        {/* Drivers & confirmation — assign each driver + track flyer/confirm per driver */}
+        <div className="load-drivers-conf">
+          <div className="load-assign-title">Drivers &amp; confirmation <span className="am-muted">— flyer sent → <b className="dc-y">pending</b>, confirmed → <b className="dc-g">ready</b>. Each driver independently.</span></div>
+          <DriverConfRow n={1} name={l.driver1} roster={roster} warn={availWarn(l.driver1)}
+            flyer={l.driver1Flyer} confirmed={l.driver1Confirmed}
+            onName={(v) => f('driver1', v)} onFlyer={(v) => f('driver1Flyer', v)} onConfirm={(v) => f('driver1Confirmed', v)} />
+          <DriverConfRow n={2} name={l.driver2} roster={roster} warn={availWarn(l.driver2)} optional
+            flyer={l.driver2Flyer} confirmed={l.driver2Confirmed}
+            onName={(v) => f('driver2', v)} onFlyer={(v) => f('driver2Flyer', v)} onConfirm={(v) => f('driver2Confirmed', v)} />
+          <datalist id="load-roster">{roster.map((n) => <option key={n} value={n} />)}</datalist>
+        </div>
+
         {!assignable && (
           <div className="load-clear-row">
             {confirmClear
@@ -260,12 +296,35 @@ function StopsPanel({ l, highlight }: { l: Load; highlight?: boolean }) {
 }
 
 /* ---------------- Stops ---------------- */
-function StopsTab({ l, setL }: { l: Load; setL: React.Dispatch<React.SetStateAction<Load>> }) {
+function StopsTab({ l, setL, persist }: { l: Load; setL: React.Dispatch<React.SetStateAction<Load>>; persist: (n?: Partial<Load>) => Promise<Load> }) {
   const upd = (i: number, k: keyof LoadStop, v: string | number) =>
     setL((p) => ({ ...p, stops: p.stops.map((s, j) => (j === i ? { ...s, [k]: v } : s)) }));
   const add = (type: LoadStop['type']) =>
     setL((p) => ({ ...p, stops: [...p.stops, blankStop(type, p.stops.length + 1)] }));
   const del = (i: number) => setL((p) => ({ ...p, stops: p.stops.filter((_, j) => j !== i) }));
+
+  /* split control — live here next to ＋Pickup/＋Delivery so the split can be
+     added and MOVED right from the stops list (the ✂ Split tab still assigns
+     a truck to each leg). A "cut" is a stop index between pickup and delivery. */
+  const sorted = useMemo(() => l.stops.slice().sort((a, b) => a.sequence - b.sequence), [l.stops]);
+  const canSplit = sorted.length >= 3;
+  const cuts = l.segments.slice(0, -1).map((s) => s.toStop);
+  async function rebuild(nextCuts: number[]) {
+    const withSegs = { ...l, segments: buildSegments(l, nextCuts) };
+    setL(await persist(proportionRevenue(await persist(withSegs))));
+  }
+  async function splitLoad() {
+    if (!canSplit) return;
+    await rebuild(cuts.length ? cuts : [Math.max(1, Math.min(sorted.length - 2, Math.round(sorted.length / 2)))]);
+  }
+  async function moveCut(idx: number, dir: -1 | 1) {
+    const next = cuts.slice(); const nv = next[idx] + dir;
+    if (nv <= 0 || nv >= sorted.length - 1 || next.some((c, j) => j !== idx && c === nv)) return;
+    next[idx] = nv; await rebuild(next.sort((a, b) => a - b));
+  }
+  async function removeSplit() { setL(await persist({ segments: [] })); }
+  const cutLabel = (c: number) => `#${sorted[c]?.sequence} ${[sorted[c]?.city, sorted[c]?.state].filter(Boolean).join(', ') || sorted[c]?.type || 'stop'}`;
+
   return (
     <div>
       {l.stops.map((s, i) => (
@@ -294,22 +353,54 @@ function StopsTab({ l, setL }: { l: Load; setL: React.Dispatch<React.SetStateAct
       <div className="load-stopadd">
         <button className="am-save" onClick={() => add('pickup')}>＋ Pickup</button>
         <button className="am-save" style={{ background: '#7c5cff', color: '#fff' }} onClick={() => add('delivery')}>＋ Delivery</button>
+        {l.segments.length === 0 && (
+          <button className="am-save load-split-btn" disabled={!canSplit}
+            title={canSplit ? 'Split into two legs at a shuttle/relay stop — you can move the split point after' : 'Add a middle stop (a shuttle/handoff) first — need at least 3 stops to split'}
+            onClick={splitLoad}>✂ Split load</button>
+        )}
         <span className="am-muted">Distance & CPM recalculate on Save.</span>
       </div>
+      {l.segments.length > 0 && (
+        <div className="load-split-ctl">
+          <span className="load-split-ctl-title">✂ Split into {l.segments.length} legs</span>
+          {cuts.map((c, idx) => (
+            <span key={idx} className="load-split-chip">
+              <span className="load-split-chip-lab">split after {cutLabel(c)}</span>
+              <button className="split-move" title="Move split one stop earlier" disabled={c <= 1 || cuts.some((x, j) => j !== idx && x === c - 1)} onClick={() => moveCut(idx, -1)}>▲</button>
+              <button className="split-move" title="Move split one stop later" disabled={c >= sorted.length - 2 || cuts.some((x, j) => j !== idx && x === c + 1)} onClick={() => moveCut(idx, 1)}>▼</button>
+            </span>
+          ))}
+          {sorted.length > l.segments.length + 1 && (
+            <button className="am-clear split-add-cut" title="Add another split point" onClick={() => rebuild([...cuts, sorted.slice(1, -1).map((_, i) => i + 1).find((i) => !cuts.includes(i)) ?? cuts[cuts.length - 1]])}>＋ Cut</button>
+          )}
+          <button className="am-clear" onClick={removeSplit}>✕ Remove split</button>
+          <span className="am-muted">Assign a truck to each leg on the ✂ Split tab.</span>
+        </div>
+      )}
     </div>
   );
 }
 
-/* ---------------- Customer ---------------- */
-function CustomerTab({ l, f }: { l: Load; f: <K extends keyof Load>(k: K, v: Load[K]) => void }) {
-  const customers = useMemo(() => loadCustomers(), []);
+/* one driver row: name + flyer + confirmed toggles, colored by state. Yellow =
+   flyer sent / pending; light green = confirmed. Independent per driver. */
+function DriverConfRow({ n, name, warn, flyer, confirmed, optional, onName, onFlyer, onConfirm }: {
+  n: number; name: string; roster: string[]; warn: string;
+  flyer: boolean; confirmed: boolean; optional?: boolean;
+  onName: (v: string) => void; onFlyer: (v: boolean) => void; onConfirm: (v: boolean) => void;
+}) {
+  const st = driverState(flyer, confirmed);
+  const chip = st === 'confirmed' ? 'Confirmed' : st === 'pending' ? 'Pending' : (name.trim() ? 'Assigned' : '—');
   return (
-    <div className="load-fields" style={{ maxWidth: 460 }}>
-      <L t="Customer *">
-        <input className="am-input" list="load-customers2" value={l.customerName} onChange={(e) => f('customerName', e.target.value)} />
-        <datalist id="load-customers2">{customers.map((c) => <option key={c.id} value={c.name} />)}</datalist>
-      </L>
-      <p className="am-muted" style={{ fontSize: 12 }}>Typing a new name registers the customer automatically on Save. Full customer profiles (contacts, billing) come with the shared database step.</p>
+    <div className={`drv-conf drv-conf-${st}`}>
+      <span className="drv-conf-num">D{n}</span>
+      <input className="am-input drv-conf-name" list="load-roster" value={name}
+        placeholder={optional ? 'solo? leave blank' : 'pick or type a driver…'} onChange={(e) => onName(e.target.value)} />
+      <button type="button" className={`drv-conf-btn ${flyer ? 'on-y' : ''}`} disabled={!name.trim()}
+        title="Flyer sent → pending confirmation (yellow)" onClick={() => onFlyer(!flyer)}>{flyer ? '✈ Flyer sent' : '✈ Send flyer'}</button>
+      <button type="button" className={`drv-conf-btn ${confirmed ? 'on-g' : ''}`} disabled={!name.trim()}
+        title="Driver confirmed (light green)" onClick={() => onConfirm(!confirmed)}>{confirmed ? '✓ Confirmed' : 'Confirm'}</button>
+      <span className={`drv-conf-chip ${st}`}>{chip}</span>
+      {warn && <span className="load-avail-warn">{warn}</span>}
     </div>
   );
 }

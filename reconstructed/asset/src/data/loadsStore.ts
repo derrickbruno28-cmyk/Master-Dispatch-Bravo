@@ -39,10 +39,17 @@ export interface Load {
   routeName: string;          // required-to-dispatch *
   customerId: string;         // *
   customerName: string;       // *
-  loadType: string;           // * TL | LTL
+  loadType: string;           // TL | LTL (legacy — no longer shown/required)
   equipment: string;          // *
   assignedTruck: string;      // *
   assignedTeamId: string;     // *
+  assignedTrailer: string;    // trailer #
+  driver1: string;            // assigned drivers (load-level, LoadStop-style)
+  driver2: string;
+  driver1Flyer: boolean;      // flyer sent → pending confirm (yellow)
+  driver2Flyer: boolean;
+  driver1Confirmed: boolean;  // driver confirmed (green)
+  driver2Confirmed: boolean;
   rate: number | null;        // revenue
   weight: string;
   referenceNo: string;
@@ -97,8 +104,10 @@ export function blankLoad(tractor: string, date: string, init?: Partial<Load>): 
     id: `load-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
     date, routeName: '', customerId: '', customerName: '',
     loadType: 'TL', equipment: '', assignedTruck: tractor, assignedTeamId: tractor,
+    assignedTrailer: '', driver1: '', driver2: '',
+    driver1Flyer: false, driver2Flyer: false, driver1Confirmed: false, driver2Confirmed: false,
     rate: null, weight: '', referenceNo: '', bookingAuthority: '', commodity: '',
-    dispatchNotes: '', uspsContract: false, status: 'covered',
+    dispatchNotes: '', uspsContract: false, status: 'unassigned',
     stops: [blankStop('pickup', 1), blankStop('delivery', 2)],
     laneMiles: null, cpm: null, segments: [], dispatchedAt: '',
     createdAt: new Date().toISOString(),
@@ -294,7 +303,6 @@ export function missingForDispatch(l: Load): string[] {
   const out: string[] = [];
   if (!l.routeName.trim()) out.push('Route name');
   if (!l.customerName.trim()) out.push('Customer');
-  if (!l.loadType.trim()) out.push('Load type');
   if (!l.equipment.trim()) out.push('Equipment');
   if (!l.assignedTruck.trim()) out.push('Assigned truck');
   if (!l.stops.some((s) => s.type === 'pickup')) out.push('At least one pickup stop');

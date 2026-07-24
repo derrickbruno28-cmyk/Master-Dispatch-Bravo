@@ -499,6 +499,45 @@
 .split-seg-cpm { margin-left: auto; font-size: 12px; color: var(--muted); }
 .split-handoff { text-align: center; color: #e8590c; font-weight: 700; font-size: 11.5px; letter-spacing: 0.5px; margin: 8px 0; }
 
+/* ---- inline split control in the Stops tab (split button + movable cut) ---- */
+.load-split-btn { background: #e8590c; color: #fff; }
+.load-split-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+.load-split-ctl { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 10px; padding: 9px 11px; border: 1px dashed #e8590c; border-radius: 10px; background: rgba(232,89,12,0.06); }
+.load-split-ctl-title { font-size: 12px; font-weight: 800; color: #e8590c; }
+.load-split-chip { display: inline-flex; align-items: center; gap: 4px; background: var(--panel); border: 1px solid var(--border); border-radius: 999px; padding: 3px 6px 3px 10px; font-size: 11.5px; font-weight: 600; }
+.load-split-chip-lab { color: var(--text); }
+.split-move { border: 1px solid var(--border); background: var(--panel-2, var(--panel)); color: var(--text); border-radius: 6px; width: 20px; height: 20px; line-height: 1; font-size: 10px; cursor: pointer; padding: 0; }
+.split-move:disabled { opacity: 0.3; cursor: not-allowed; }
+.split-add-cut { font-size: 11.5px; }
+
+/* ---- driver availability warning (board date vs ready-to-go) ---- */
+.load-avail-warn { display: inline-block; font-size: 11px; font-weight: 700; color: #b7791f; background: rgba(236,201,75,0.16); border: 1px solid #ecc94b; border-radius: 6px; padding: 2px 7px; }
+
+/* ---- drivers & confirmation block (Bravo-style per-driver flyer/confirm) ---- */
+.load-drivers-conf { margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--border); display: flex; flex-direction: column; gap: 7px; }
+.dc-y { color: #b7791f; }
+.dc-g { color: #2f855a; }
+.drv-conf { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; border: 1px solid var(--border); border-left: 4px solid var(--border); border-radius: 9px; padding: 7px 10px; }
+.drv-conf-assigned { border-left-color: var(--muted); }
+.drv-conf-pending { border-left-color: #ecc94b; background: rgba(236,201,75,0.08); }
+.drv-conf-confirmed { border-left-color: #68d391; background: rgba(104,211,145,0.12); }
+.drv-conf-num { font-size: 11px; font-weight: 800; color: var(--muted); min-width: 22px; }
+.drv-conf-name { max-width: 220px; }
+.drv-conf-btn { border: 1px solid var(--border); background: var(--panel-2, var(--panel)); color: var(--text); border-radius: 7px; padding: 5px 9px; font-size: 11.5px; font-weight: 600; cursor: pointer; }
+.drv-conf-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.drv-conf-btn.on-y { background: #ecc94b; border-color: #d4a933; color: #4a3808; }
+.drv-conf-btn.on-g { background: #68d391; border-color: #48bb78; color: #12401f; }
+.drv-conf-chip { font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.4px; border-radius: 999px; padding: 2px 9px; margin-left: auto; }
+.drv-conf-chip.assigned { color: var(--muted); border: 1px solid var(--border); }
+.drv-conf-chip.pending { color: #4a3808; background: #ecc94b; }
+.drv-conf-chip.confirmed { color: #12401f; background: #68d391; }
+
+/* ---- per-driver confirmation dots on the matrix cell ---- */
+.am-drvstrip { display: flex; gap: 3px; flex-wrap: wrap; margin-top: 3px; }
+.am-drvdot { font-size: 9px; font-weight: 700; border-radius: 5px; padding: 1px 5px; border: 1px solid var(--border); color: var(--muted); background: var(--panel-2, var(--panel)); }
+.am-drvdot.pd { background: #ecc94b; border-color: #d4a933; color: #4a3808; }
+.am-drvdot.cf { background: #68d391; border-color: #48bb78; color: #12401f; }
+
 .fin-kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px; margin: 6px 0 16px; }
 .fin-kpi { background: var(--panel-2, var(--panel)); border: 1px solid var(--border); border-radius: 12px; padding: 14px 16px; }
 .fin-kpi-label { font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.6px; color: var(--muted); margin-bottom: 4px; }

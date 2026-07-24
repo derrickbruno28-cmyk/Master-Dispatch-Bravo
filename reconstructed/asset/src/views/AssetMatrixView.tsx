@@ -25,14 +25,14 @@ import { nextRouteSuggestions, parseRoute, tripCode, type Match } from '../data/
 /* Load lifecycle on a matrix cell, in real dispatch order: covered → dispatched →
    at yard → at shipper → en route → at receiver → delivered → completed
    (off = home/reset). */
-const STATUSES = ['open', 'covered', 'dispatched', 'at yard', 'at shipper', 'en route', 'at receiver', 'delivered', 'completed', 'off'] as const;
+const STATUSES = ['unassigned', 'open', 'covered', 'dispatched', 'at yard', 'at shipper', 'en route', 'at receiver', 'delivered', 'completed', 'off'] as const;
 const STATUS_COLOR: Record<string, string> = {
-  open: 'var(--muted)', covered: 'var(--green)', dispatched: '#00b8d4',
+  unassigned: 'var(--muted)', open: 'var(--muted)', covered: 'var(--green)', dispatched: '#00b8d4',
   'at yard': '#b0842a', 'at shipper': '#e8a33d', 'en route': 'var(--accent)',
   'at receiver': '#7c5cff', delivered: '#6b7f9e', completed: '#a78bfa', off: 'var(--panel-2)',
 };
 const STATUS_LABEL: Record<string, string> = {
-  open: 'Open', covered: 'Covered', dispatched: 'Dispatched',
+  unassigned: 'Unassigned', open: 'Open', covered: 'Covered', dispatched: 'Dispatched',
   'at shipper': 'At Shipper', 'at yard': 'At Yard', 'en route': 'En Route',
   'at receiver': 'At Receiver', delivered: 'Delivered', completed: 'Completed', off: 'Off / Home',
 };
@@ -94,7 +94,9 @@ export default function AssetMatrixView() {
     setCreateNew(false); setPlacing(null);
     if (saved.assignedTruck.trim() && saved.date) {
       const k = cellKey(saved.assignedTruck, saved.date);
-      const a: Assignment = { route: saved.routeName, status: saved.status, usps: saved.uspsContract };
+      /* route can be blank (schedule entry started before the route is known) —
+         keep the cell occupied with a placeholder so it stays on the board */
+      const a: Assignment = { route: saved.routeName.trim() || '⏳ route TBD', status: saved.status, usps: saved.uspsContract };
       setAssign((prev) => ({ ...prev, [k]: a }));
       void setAssignment(saved.assignedTruck, saved.date, a);
       flash(`✓ Load created on #${saved.assignedTruck} · ${saved.date}`);
@@ -379,6 +381,17 @@ function TerminalRows({ term, trucks, dates, assign, setEditing, openDispatch, l
                       {a.usps && <span className="am-usps">USPS</span>}
                     </div>
                     <div className="am-status" style={{ color: STATUS_COLOR[a.status] }}>{STATUS_LABEL[a.status] ?? a.status}</div>
+                    {(() => {
+                      const ld = loads.get(k);
+                      if (!ld || (!ld.driver1 && !ld.driver2)) return null;
+                      const dot = (nm: string, fl: boolean, cf: boolean) => !nm ? null : (
+                        <span key={nm} className={`am-drvdot ${cf ? 'cf' : fl ? 'pd' : 'as'}`}
+                          title={cf ? `${nm} — confirmed` : fl ? `${nm} — flyer sent, awaiting confirm` : `${nm} — assigned`}>
+                          {nm.split(' ')[0]}
+                        </span>
+                      );
+                      return <div className="am-drvstrip">{dot(ld.driver1, ld.driver1Flyer, ld.driver1Confirmed)}{dot(ld.driver2, ld.driver2Flyer, ld.driver2Confirmed)}</div>;
+                    })()}
                     {(() => {
                       const ld = loads.get(k); const dc = ld ? (docCounts[ld.id] ?? 0) : 0;
                       return (
