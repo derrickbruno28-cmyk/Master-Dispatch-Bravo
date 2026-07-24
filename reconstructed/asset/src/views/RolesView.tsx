@@ -59,40 +59,44 @@ export default function RolesView() {
         </div>
       )}
 
-      {/* assign roles to people */}
+      {/* team roster — everyone who has signed in, auto-populated */}
       <div className="roles-section">
-        <div className="roles-section-h">User roles</div>
+        <div className="roles-section-h">Team <span className="am-muted">— everyone who has signed in. New sign-ins appear here automatically with FMT (edit-only); just pick their role.</span></div>
         <div className="am-scroll roles-scroll">
           <table className="am-grid am-fleet">
-            <thead><tr><th>Work email</th><th>Role</th><th></th></tr></thead>
+            <thead><tr><th>Person</th><th>Role</th><th>Last signed in</th><th></th></tr></thead>
             <tbody>
               {OWNER_EMAILS.map((e) => (
-                <tr key={e}><td className="am-tractor">{e}</td><td><span className="am-pill" style={{ color: 'var(--accent)' }}>Owner</span></td><td className="am-muted" style={{ fontSize: 11 }}>always owner</td></tr>
+                <tr key={e}><td className="am-tractor">{e}</td><td><span className="am-pill" style={{ color: 'var(--accent)' }}>Owner</span></td><td className="am-muted" style={{ fontSize: 11 }}>—</td><td className="am-muted" style={{ fontSize: 11 }}>always owner</td></tr>
               ))}
               {list.length === 0 && (
-                <tr><td colSpan={3} className="am-muted" style={{ textAlign: 'center', padding: 14 }}>No one assigned yet — add a teammate's work email below. New sign-ins start as FMT (edit-only).</td></tr>
+                <tr><td colSpan={4} className="am-muted" style={{ textAlign: 'center', padding: 14 }}>No one else has signed in yet. As teammates sign in with their work Google account, they'll show up here — or pre-add someone below.</td></tr>
               )}
               {list.map((u) => (
                 <tr key={u.email}>
-                  <td className="am-tractor">{u.email}</td>
+                  <td className="am-tractor">
+                    {u.displayName ? <><b>{u.displayName}</b><div className="am-muted" style={{ fontSize: 11 }}>{u.email}</div></> : u.email}
+                  </td>
                   <td>
                     <select className="am-input" style={{ maxWidth: 150 }} value={u.role} onChange={(e) => assign(u.email, e.target.value as Role)}>
                       {ASSIGNABLE_ROLES.map((r) => <option key={r} value={r}>{ROLE_LABELS[r]}</option>)}
                     </select>
                   </td>
-                  <td className="fleet-actions"><button className="fleet-del" title="Remove (falls back to FMT on next sign-in)" onClick={() => { removeRole(u.email); refresh(); }}>🗑</button></td>
+                  <td className="am-muted" style={{ fontSize: 11 }}>{u.lastSeenAt ? new Date(u.lastSeenAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) : '—'}</td>
+                  <td className="fleet-actions"><button className="fleet-del" title="Reset to FMT (edit-only)" onClick={() => { removeRole(u.email); refresh(); }}>↺</button></td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
         <div className="am-lockbtns" style={{ marginTop: 8 }}>
-          <input className="am-input" style={{ maxWidth: 300 }} placeholder="teammate@ghlogisticsllc.com" value={newEmail}
+          <span className="am-muted" style={{ fontSize: 11.5 }}>Pre-add someone before they sign in:</span>
+          <input className="am-input" style={{ maxWidth: 280 }} placeholder="teammate@ghlogisticsllc.com" value={newEmail}
             onChange={(e) => setNewEmail(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') addNew(); }} />
           <select className="am-input" style={{ maxWidth: 150 }} value={newRole} onChange={(e) => setNewRole(e.target.value as Role)}>
             {ASSIGNABLE_ROLES.map((r) => <option key={r} value={r}>{ROLE_LABELS[r]}</option>)}
           </select>
-          <button className="am-save" disabled={!newEmail.trim()} onClick={addNew}>Add / update</button>
+          <button className="am-save" disabled={!newEmail.trim()} onClick={addNew}>Add</button>
         </div>
       </div>
 

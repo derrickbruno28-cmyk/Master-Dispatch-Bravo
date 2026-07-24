@@ -15,6 +15,7 @@
 
 import { firebaseEnabled } from '../firebase';
 import { emitChange } from './bus';
+import { rosterUsers, rosterRole, setRosterRole } from './usersStore';
 
 export type Role = 'owner' | 'fmt_lead' | 'us_ops' | 'fmt';
 
@@ -45,7 +46,6 @@ export const DEFAULT_ROLE_MANAGERS = ['caleb@ghlogisticsllc.com'];
 /* new signed-in staff who haven't been assigned a role yet start edit-only */
 const DEFAULT_ROLE: Role = 'fmt';
 
-const ROLES_KEY = 'asset-user-roles-v1';      // { [email]: Role } — owner-managed
 const ROLE_MGR_KEY = 'asset-role-managers-v1';// [email] — who can see the Roles tab
 const SESSION_KEY = 'asset-session-email-v1'; // set by AuthGate (prod) / demo
 const DEMO_ROLE_KEY = 'asset-demo-role-v1';   // demo-only role preview
@@ -53,37 +53,32 @@ const DEMO_ROLE_KEY = 'asset-demo-role-v1';   // demo-only role preview
 function norm(e: string) { return (e || '').trim().toLowerCase(); }
 export function isOwnerEmail(email: string): boolean { return OWNER_EMAILS.some((o) => norm(o) === norm(email)); }
 
-/* ---- role map (owner-assigned) ---- */
-function readRoles(): Record<string, Role> {
-  try { const r = localStorage.getItem(ROLES_KEY); if (r) { const m = JSON.parse(r) as Record<string, Role>; if (m && typeof m === 'object') return m; } } catch { /* ignore */ }
-  return {};
-}
-function writeRoles(map: Record<string, Role>) {
-  try { localStorage.setItem(ROLES_KEY, JSON.stringify(map)); } catch { /* ignore */ }
-  emitChange();
-}
-
-/* the role for any email — owner emails always win, then the assigned role, then
-   the edit-only default for a recognized (signed-in) email */
+/* the role for any email — owner emails always win, then the role the owner
+   assigned in the shared roster, then the edit-only default for anyone who has
+   signed in but hasn't been given a role yet */
 export function roleOf(email: string): Role | '' {
   const e = norm(email);
   if (!e) return '';
   if (isOwnerEmail(e)) return 'owner';
-  return readRoles()[e] ?? DEFAULT_ROLE;
+  return rosterRole(e) ?? DEFAULT_ROLE;
 }
 
-/* owner-managed assignments to show in the Manage Roles panel (owner excluded —
-   the owner can't reassign themselves) */
-export function roleAssignments(): { email: string; role: Role }[] {
-  const m = readRoles();
-  return Object.keys(m).sort().map((email) => ({ email, role: m[email] }));
+/* everyone who has signed in (owner excluded — shown separately, always owner),
+   each with their assigned role or the FMT default. New sign-ins appear here
+   automatically via the shared roster. */
+export interface RoleRow { email: string; role: Role; displayName: string; lastSeenAt?: number }
+export function roleAssignments(): RoleRow[] {
+  return rosterUsers()
+    .filter((u) => !isOwnerEmail(u.email))
+    .map((u) => ({ email: u.email, role: u.role ?? DEFAULT_ROLE, displayName: u.displayName, lastSeenAt: u.lastSeenAt }));
 }
 export function setRole(email: string, role: Role): void {
   const e = norm(email); if (!e || isOwnerEmail(e)) return; // never demote/assign the owner
-  const m = readRoles(); m[e] = role; writeRoles(m);
+  setRosterRole(e, role);
 }
 export function removeRole(email: string): void {
-  const m = readRoles(); delete m[norm(email)]; writeRoles(m);
+  const e = norm(email); if (!e || isOwnerEmail(e)) return;
+  setRosterRole(e, null);   // clears back to the FMT default on next lookup
 }
 
 /* ---- current session identity ---- */

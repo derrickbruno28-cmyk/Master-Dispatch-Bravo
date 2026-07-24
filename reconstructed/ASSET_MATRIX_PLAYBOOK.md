@@ -62,6 +62,7 @@ Newest first. **Current live version is flagged.** Use the SHA to revert.
 
 | Version | Commit | Date | What it added |
 |--------|--------|------|----------------|
+| v0.10.0 *(staged on branch — not yet live)* | — | 2026-07-24 | **Shared user roster:** everyone who signs in auto-populates the Roles tab (first shared-Firestore data). New sign-ins appear with the FMT default (edit, no delete); the owner just assigns a role. No more typing emails by hand |
 | v0.9.0 *(staged on branch — not yet live)* | `12ae216` | 2026-07-24 | Fleet Map rebuilt on **MapLibre GL**: real vector basemap (OpenFreeMap, no key), native zoom/pan, truck markers that glide as GPS updates, weather/traffic/geofence layers, base-map switcher with Satellite/Hybrid/Terrain gated on a MapTiler key |
 | **v0.8.0 ← LIVE** | `1476a69` | 2026-07-24 | Samsara integration scaffold (adapter + Integrations page), HOS-gated next-route suggestions on the calendar, first Samsara-style Fleet Map (SVG), geofence import, Drivers→"Driver Availability" rename |
 | v0.7.0 | `7138e96` | 2026-07-24 | Navigation overhaul: collapsible left side-panel nav, minimal top bar, universal search replaced with separate Driver / Team / Route look-up filters |
@@ -159,7 +160,12 @@ planned**. This is the map for deciding what to change.
 - **Now:** 4 roles — **Owner** (full control incl. assigning roles), **FMT Lead**
   and **US Ops** (everything except assigning roles), **FMT** (edit-only: add/
   remove info but **never** delete loads/drivers/teams). Role legend, demo role
-  switcher, per-user assignment, owner-only "who can manage roles."
+  switcher, owner-only "who can manage roles."
+- **Team roster (v0.10.0):** everyone who signs in **auto-populates** the Team
+  table (shared `assetUsers` Firestore collection — the first shared data). A new
+  sign-in shows up with the **FMT default (edit, no delete)**; you just pick their
+  role from the dropdown. Shows name · email · last-signed-in. You can also
+  pre-add someone before they sign in. ↺ resets a person to the FMT default.
 
 ### Fleet Status
 - **Purpose:** the live status of every truck/team (NTB, deadhead, reset,
@@ -276,12 +282,13 @@ today and the full Samsara look the moment you add one free key.
   (you're doing the backend; front-end is ready).
 - **Equipment + customer lists** — provide the LoadStop van/equipment types and
   the starting customer list to replace the placeholders.
-- **Shared Firestore** — move data off per-browser localStorage to shared,
-  multi-user Firestore.
+- **Shared Firestore** — move remaining data off per-browser localStorage to
+  shared, multi-user Firestore. *(Started: the user roster `assetUsers` is the
+  first shared collection, v0.10.0.)*
 - **Bravo merge** — bring the assigned USPS rep/route data across from Bravo;
   keep asset operations independent otherwise.
 
 ---
 
-*Last updated: 2026-07-24 · live = v0.8.0 (`1476a69`); v0.9.0 (`12ae216`) staged
-on branch awaiting deploy. Ask me to update this doc whenever we ship a new version.*
+*Last updated: 2026-07-24 · live = v0.8.0 (`1476a69`); v0.9.0 (`12ae216`) + v0.10.0
+staged on branch awaiting deploy. Ask me to update this doc whenever we ship a new version.*

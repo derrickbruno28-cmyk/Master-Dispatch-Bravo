@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { onAuthStateChanged, getRedirectResult, type User } from 'firebase/auth';
 import { auth, firebaseEnabled, signInWithGoogle, signOut, isCompanyEmail } from './firebase';
 import { setSessionEmail, clearSession, currentRole, ROLE_LABELS } from './data/permStore';
+import { recordSignIn } from './data/usersStore';
 
 /* AuthGate — mirrors the GH Driver Hub sign-in. When Firebase is configured
    (production), the Asset Matrix is only reachable after a Google sign-in with a
@@ -23,7 +24,7 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
     return onAuthStateChanged(auth, (u) => {
       // enforce the work-email allowlist even on restored sessions
       if (u && u.email && !isCompanyEmail(u.email)) { void signOut(); clearSession(); setUser(null); setErr('That account isn’t authorized. Sign in with your approved work account.'); }
-      else if (u && u.email) { setSessionEmail(u.email); setUser(u); }
+      else if (u && u.email) { setSessionEmail(u.email); recordSignIn(u.email, u.displayName || ''); setUser(u); }
       else { clearSession(); setUser(u); }
       setReady(true);
     });
