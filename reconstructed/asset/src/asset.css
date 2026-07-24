@@ -715,3 +715,7 @@
 .asset-update-btn:hover { box-shadow: 0 0 0 3px rgba(255,255,255,0.4); }
 .asset-update-x { margin-left: auto; border: 0; background: transparent; color: #fff; font: inherit; font-size: 15px; cursor: pointer; opacity: 0.85; }
 .asset-update-x:hover { opacity: 1; }
+
+/* Samsara — geofence-source radio in the org table */
+.samsara-geo-pick { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; cursor: pointer; }
+.samsara-geo-pick input { margin: 0; }

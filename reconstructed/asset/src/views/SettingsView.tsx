@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { samsaraKey, setSamsaraKey, maskedKey, samsaraStatus, samsara, type ConnStatus } from '../integrations/samsara';
+import { samsaraOrgs, setSamsaraOrgKey, geofenceSourceId, setGeofenceSourceId, maskKey, samsaraStatus, samsara, type ConnStatus, type SamsaraOrg } from '../integrations/samsara';
 import { fleetioClient } from '../integrations/telematics';
 import { maptilerKey, setMaptilerKey, maptilerMasked } from '../integrations/mapstyle';
 import { onChange, emitChange } from '../data/bus';
@@ -25,24 +25,15 @@ export default function SettingsView() {
   const [, force] = useState(0);
   useEffect(() => onChange(() => force((n) => n + 1)), []);
 
-  const [draft, setDraft] = useState('');
-  const [saved, setSaved] = useState('');
   const [mtDraft, setMtDraft] = useState('');
   const status = samsaraStatus();
   const meta = STATUS_META[status];
   const flt = fleetioClient();
+  const orgs = samsaraOrgs();
+  const geoSource = geofenceSourceId();
 
   function saveMt() { setMaptilerKey(mtDraft); setMtDraft(''); emitChange(); }
   function clearMt() { setMaptilerKey(''); setMtDraft(''); emitChange(); }
-
-  function save() {
-    setSamsaraKey(draft);
-    setDraft('');
-    setSaved('✓ API key saved to this browser. It runs on mock data until the backend is wired.');
-    emitChange();
-    window.setTimeout(() => setSaved(''), 4000);
-  }
-  function clear() { setSamsaraKey(''); setDraft(''); emitChange(); }
 
   const [restoring, setRestoring] = useState(false);
   const [restoreMsg, setRestoreMsg] = useState('');
@@ -128,7 +119,7 @@ export default function SettingsView() {
         </div>
       )}
 
-      {/* Samsara */}
+      {/* Samsara — three organizations */}
       <div className="intg-card">
         <div className="intg-card-head">
           <div className="intg-card-title">
@@ -137,32 +128,32 @@ export default function SettingsView() {
           </div>
           <span className="intg-badge">{samsara().label}</span>
         </div>
+        <p className="am-muted" style={{ fontSize: 12.5, maxWidth: 760 }}>
+          Three Samsara organizations. <b>Driver HOS</b> and <b>Truck GPS</b> read from <b>all three</b> (read-only) and merge together.
+          <b> Geofences</b> import from the <b>one org you mark below</b> — set to <b>AJG Transport</b> by default. Keys live only in your browser and are never stored in the app's code.
+        </p>
 
-        <div className="intg-key-row">
-          <div className="otp-field" style={{ flex: 1, minWidth: 260 }}>
-            <span className="otp-field-label">Samsara API key</span>
-            {samsaraKey()
-              ? <div className="intg-saved-key">🔑 {maskedKey()} <button type="button" className="am-clear" onClick={clear}>Remove</button></div>
-              : (
-                <div style={{ display: 'flex', gap: 8 }}>
-                  <input className="am-input" type="password" placeholder="paste your Samsara API token…" value={draft}
-                    onChange={(e) => setDraft(e.target.value)} autoComplete="off" />
-                  <button type="button" className="am-save" disabled={!draft.trim()} onClick={save}>Save key</button>
-                </div>
-              )}
-          </div>
+        <div className="am-scroll">
+          <table className="am-grid am-fleet">
+            <thead><tr><th>Organization</th><th>Read-only API key</th><th>Geofence source</th></tr></thead>
+            <tbody>
+              {orgs.map((o) => (
+                <SamsaraOrgRow key={o.id} org={o} isGeoSource={geoSource === o.id}
+                  onGeoSource={() => { setGeofenceSourceId(o.id); emitChange(); }} />
+              ))}
+            </tbody>
+          </table>
         </div>
-        {saved && <div className="am-notice" style={{ color: 'var(--green)', borderColor: 'rgba(34,197,94,0.4)', background: 'rgba(34,197,94,0.08)' }}>{saved}</div>}
         <p className="am-muted" style={{ fontSize: 11.5 }}>
-          Paste the token when you're ready — nothing is sent anywhere yet. The live backend connection is being added next; saving the key now just gets it in place.
+          Paste each org's <b>read-only</b> token when you're ready — nothing is sent anywhere yet. The live backend connection is being added next; saving the keys now just gets them in place.
         </p>
 
         <div className="intg-feature-grid">
-          <IntgFeature icon="🕒" title="Driver HOS" desc="Hours-of-service drives the route-suggestion ranking on the planning calendar." />
-          <IntgFeature icon="🛰" title="Truck GPS Tracking" desc="Live positions plot every truck on the Fleet Map." />
-          <IntgFeature icon="⬛" title="Geofence Import" desc="Pull yard & customer geofences in from Samsara onto the Fleet Map." />
+          <IntgFeature icon="🕒" title="Driver HOS" desc="Reads from all 3 orgs · drives the route-suggestion ranking on the planning calendar." />
+          <IntgFeature icon="🛰" title="Truck GPS Tracking" desc="Reads from all 3 orgs · plots every truck on the Fleet Map." />
+          <IntgFeature icon="⬛" title="Geofence Import" desc="From the AJG org only · pulls yard & customer geofences onto the Fleet Map." />
         </div>
-        <div className="intg-mock-note">All three run on <b>mock data</b> today via one shared Samsara adapter — the real feed swaps in behind the same interface.</div>
+        <div className="intg-mock-note">All run on <b>mock data</b> today via one shared Samsara adapter — the real per-org feeds swap in behind the same interface.</div>
       </div>
 
       {/* Map imagery (optional) — enables satellite/hybrid/terrain on the Fleet Map */}
@@ -201,6 +192,34 @@ export default function SettingsView() {
         <p className="am-muted" style={{ fontSize: 12 }}>Maintenance / out-of-service status. Drives the Out of Service board and the matrix row-lock. Runs on mock data until a Fleetio token is added.</p>
       </div>
     </div>
+  );
+}
+
+function SamsaraOrgRow({ org, isGeoSource, onGeoSource }: { org: SamsaraOrg; isGeoSource: boolean; onGeoSource: () => void }) {
+  const [draft, setDraft] = useState('');
+  function save() { if (draft.trim()) { setSamsaraOrgKey(org.id, draft); setDraft(''); emitChange(); } }
+  function remove() { setSamsaraOrgKey(org.id, ''); setDraft(''); emitChange(); }
+  return (
+    <tr>
+      <td className="am-tractor">{org.name}</td>
+      <td>
+        {org.key
+          ? <span className="intg-saved-key">🔑 {maskKey(org.key)} <button type="button" className="am-clear" onClick={remove}>Remove</button></span>
+          : (
+            <span style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+              <input className="am-input" type="password" style={{ maxWidth: 240 }} placeholder="paste read-only token…" value={draft}
+                onChange={(e) => setDraft(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') save(); }} autoComplete="off" />
+              <button type="button" className="am-save" disabled={!draft.trim()} onClick={save}>Save</button>
+            </span>
+          )}
+      </td>
+      <td>
+        <label className="samsara-geo-pick">
+          <input type="radio" name="samsara-geo-source" checked={isGeoSource} onChange={onGeoSource} />
+          {isGeoSource ? <b>Geofences from here</b> : <span className="am-muted" style={{ fontSize: 11.5 }}>use for geofences</span>}
+        </label>
+      </td>
+    </tr>
   );
 }
 

@@ -14,17 +14,65 @@
 import { loadFleet } from '../data/fleetStore';
 import { CITY_COORDS } from '../data/fleet';
 
-const KEY_STORE = 'asset-samsara-key-v1';
+/* THREE Samsara organizations. Driver HOS + Truck GPS are READ from ALL orgs
+   that have a key and merged. Geofences are pulled from ONE org only — the
+   designated geofence source (AJG by default). Each org's read-only API token
+   is pasted in the Integrations panel and kept in localStorage; never hardcoded,
+   never sent anywhere until the backend proxy is wired. */
+
+const ORG_STORE = 'asset-samsara-orgs-v1';
+const GEO_SOURCE_STORE = 'asset-samsara-geo-source-v1';
+const LEGACY_KEY = 'asset-samsara-key-v1';   // pre-multi-org single key (migrated in)
 const GEO_STORE = 'asset-geofences-v1';
 
 export type ConnStatus = 'not_configured' | 'key_saved' | 'connected';
 
-export function samsaraKey(): string { try { return localStorage.getItem(KEY_STORE) || ''; } catch { return ''; } }
-export function setSamsaraKey(k: string) { try { k.trim() ? localStorage.setItem(KEY_STORE, k.trim()) : localStorage.removeItem(KEY_STORE); } catch { /* ignore */ } }
-export function maskedKey(): string { const k = samsaraKey(); return k ? `${k.slice(0, 4)}••••••••${k.slice(-4)}` : ''; }
-/* real connection is deferred — even with a key saved we stay on mock until the
+export interface SamsaraOrg { id: string; name: string; key: string }
+
+/* the three orgs, stable ids. Names are editable; AJG is the default geofence
+   source per the ops rule "geofences only come from the AJG Samsara profile". */
+const DEFAULT_ORGS: { id: string; name: string }[] = [
+  { id: 'gh', name: 'GH Logistics' },
+  { id: 'ajg', name: 'AJG Transport' },
+  { id: 'org3', name: 'Third Organization' },
+];
+export const DEFAULT_GEO_SOURCE = 'ajg';
+
+export function samsaraOrgs(): SamsaraOrg[] {
+  let saved: SamsaraOrg[] = [];
+  try { const r = localStorage.getItem(ORG_STORE); if (r) { const a = JSON.parse(r) as SamsaraOrg[]; if (Array.isArray(a)) saved = a; } } catch { /* ignore */ }
+  let legacy = ''; try { legacy = localStorage.getItem(LEGACY_KEY) || ''; } catch { /* ignore */ }
+  /* always exactly the three stable orgs; merge saved key/name, migrate the old
+     single key into the first org if nothing else is saved there */
+  return DEFAULT_ORGS.map((d, i) => {
+    const s = saved.find((x) => x.id === d.id);
+    const key = s?.key || (i === 0 && saved.length === 0 ? legacy : '');
+    return { id: d.id, name: s?.name || d.name, key };
+  });
+}
+function writeOrgs(orgs: SamsaraOrg[]) { try { localStorage.setItem(ORG_STORE, JSON.stringify(orgs)); } catch { /* ignore */ } }
+
+export function setSamsaraOrgKey(id: string, key: string) {
+  writeOrgs(samsaraOrgs().map((o) => (o.id === id ? { ...o, key: key.trim() } : o)));
+}
+export function setSamsaraOrgName(id: string, name: string) {
+  writeOrgs(samsaraOrgs().map((o) => (o.id === id ? { ...o, name: name.trim() || o.name } : o)));
+}
+
+export function geofenceSourceId(): string {
+  try { return localStorage.getItem(GEO_SOURCE_STORE) || DEFAULT_GEO_SOURCE; } catch { return DEFAULT_GEO_SOURCE; }
+}
+export function setGeofenceSourceId(id: string) { try { localStorage.setItem(GEO_SOURCE_STORE, id); } catch { /* ignore */ } }
+export function geofenceSourceOrg(): SamsaraOrg | undefined {
+  const orgs = samsaraOrgs();
+  return orgs.find((o) => o.id === geofenceSourceId()) || orgs[0];
+}
+
+export function maskKey(k: string): string { return k ? `${k.slice(0, 4)}••••••••${k.slice(-4)}` : ''; }
+export function connectedOrgCount(): number { return samsaraOrgs().filter((o) => o.key).length; }
+/* real connection is deferred — even with keys saved we stay on mock until the
    backend is wired, so status never claims a live link it doesn't have */
-export function samsaraStatus(): ConnStatus { return samsaraKey() ? 'key_saved' : 'not_configured'; }
+export function samsaraStatus(): ConnStatus { return connectedOrgCount() > 0 ? 'key_saved' : 'not_configured'; }
 
 /* ---- shared data shapes (what the real API will also return) ---- */
 export interface DriverHos {
@@ -71,10 +119,9 @@ function dutyFromStatus(s: string): DriverHos['dutyStatus'] {
 class MockSamsara implements SamsaraService {
   get status(): ConnStatus { return samsaraStatus(); }
   get label(): string {
-    const s = samsaraStatus();
-    return s === 'not_configured' ? 'Samsara: not connected (mock data)'
-      : s === 'key_saved' ? 'Samsara: key saved · backend pending (mock data)'
-      : 'Samsara: connected';
+    const n = connectedOrgCount();
+    return n === 0 ? 'Samsara: no orgs connected (mock data)'
+      : `Samsara: ${n} of 3 orgs · key${n === 1 ? '' : 's'} saved · backend pending (mock data)`;
   }
   async hos(): Promise<DriverHos[]> {
     return loadFleet().map((t) => {
@@ -112,27 +159,33 @@ class MockSamsara implements SamsaraService {
   }
   savedGeofences(): Geofence[] { return importedGeofences(); }
   async fetchRemoteGeofences(): Promise<Geofence[]> {
-    /* the set that "exists in Samsara" and can be imported (stub) */
+    /* Geofences come from ONE org only — the designated geofence source (AJG).
+       Mock returns a stub set tagged to that org; when the backend is wired this
+       reads geofenceSourceOrg().key and hits only that org's /fleet/geofences. */
+    const src = geofenceSourceOrg();
     const at = (city: string, name: string, kind: Geofence['kind'], r: number): Geofence => {
       const c = CITY_COORDS[city] ?? CITY_COORDS['DALLAS'];
       return { id: `sg-${city.toLowerCase().replace(/\s+/g, '-')}-${kind}`, name, lat: c.lat, lng: c.lng, radiusMeters: r, kind, source: 'mock' };
     };
+    const label = src ? src.name : 'AJG Transport';
     return [
-      at('DALLAS', 'GH Dallas Yard', 'yard', 400),
-      at('SAN ANTONIO', 'GH San Antonio Terminal', 'terminal', 500),
-      at('MEMPHIS', 'GH Memphis Yard', 'yard', 350),
+      at('DALLAS', `${label} Dallas Yard`, 'yard', 400),
+      at('SAN ANTONIO', `${label} San Antonio Terminal`, 'terminal', 500),
+      at('MEMPHIS', `${label} Memphis Yard`, 'yard', 350),
       at('COPPELL', 'USPS Coppell NDC', 'customer', 300),
       at('ATLANTA', 'USPS Atlanta P&DC', 'customer', 300),
-      at('HOUSTON', 'GH Houston Drop', 'other', 250),
+      at('HOUSTON', `${label} Houston Drop`, 'other', 250),
     ];
   }
 }
 
 const mock = new MockSamsara();
 export function samsara(): SamsaraService { return mock; }
-/* TODO(go-live): real client — read samsaraKey(), POST to the backend proxy that
-   holds the token server-side; map /fleet/hos_daily_logs → DriverHos,
-   /fleet/vehicles/locations → TruckGps, /fleet/geofences → Geofence. Same shapes. */
+/* TODO(go-live): real client — for each org in samsaraOrgs() with a key, POST to
+   the backend proxy that holds that org's token server-side; MERGE the results:
+   HOS from /fleet/hos_daily_logs and GPS from /fleet/vehicles/locations across
+   ALL connected orgs → DriverHos/TruckGps; geofences from /fleet/geofences on
+   geofenceSourceOrg() ONLY → Geofence. Same shapes; nothing else changes. */
 
 /* ---- imported-geofence store (persists what the user pulled in) ---- */
 export function importedGeofences(): Geofence[] {
