@@ -263,6 +263,7 @@ export default function AssetMatrixView() {
                 hosByTruck={hosByTruck}
                 sugCell={sugCell}
                 setSugCell={setSugCell}
+                advanceWeek={() => setWeekStart(addDays(weekStart, 7))}
               />
             ))}
           </tbody>
@@ -346,7 +347,7 @@ function AddTeamModal({ onClose, onAdded }: { onClose: () => void; onAdded: (tra
   );
 }
 
-function TerminalRows({ term, trucks, dates, assign, setEditing, openDispatch, loads, docCounts, save, move, confirmClear, setConfirmClear, flash, canDel, oos, hosByTruck, sugCell, setSugCell }: {
+function TerminalRows({ term, trucks, dates, assign, setEditing, openDispatch, loads, docCounts, save, move, confirmClear, setConfirmClear, flash, canDel, oos, hosByTruck, sugCell, setSugCell, advanceWeek }: {
   term: string; trucks: FleetTruck[]; dates: string[];
   assign: Record<string, Assignment>;
   setEditing: (k: string) => void; openDispatch: (k: string) => void;
@@ -356,10 +357,13 @@ function TerminalRows({ term, trucks, dates, assign, setEditing, openDispatch, l
   confirmClear: string | null; setConfirmClear: (k: string | null) => void;
   flash: (msg: string) => void; canDel: boolean; oos: Set<string>;
   hosByTruck: Record<string, number>; sugCell: string | null; setSugCell: (k: string | null) => void;
+  advanceWeek: () => void;
 }) {
   const teams = trucks.filter((t) => (t.driver2 || '').trim());
   const solos = trucks.filter((t) => !(t.driver2 || '').trim());
   const [confirmRemove, setConfirmRemove] = useState<string | null>(null);
+  const [moving, setMoving] = useState<string | null>(null);   // team being carried to next week
+  const [moveTruck, setMoveTruck] = useState('');
 
   function renderTruck(t: FleetTruck) {
         const outOfService = oos.has(t.tractor);
@@ -387,10 +391,22 @@ function TerminalRows({ term, trucks, dates, assign, setEditing, openDispatch, l
                 ? <span className="am-teamremove-c"><span className="am-muted">Remove team?</span>
                     <button className="fleet-del" title="Remove team" onClick={() => { removeTruck(t.tractor); setConfirmRemove(null); }}>✓</button>
                     <button className="am-clear" title="Keep" onClick={() => setConfirmRemove(null)}>✕</button></span>
-                : canDel
-                  ? <button className="am-teamremove" title="Remove this team from the board (not running / not utilized)" onClick={() => setConfirmRemove(t.tractor)}>✕</button>
-                  : null}
+                : <>
+                    <button className="am-teamnext" title="Carry these drivers to next week on a (possibly different) truck" onClick={() => { setMoving(t.tractor); setMoveTruck(''); }}>→ wk</button>
+                    {canDel && <button className="am-teamremove" title="Remove this team from the board (not running / not utilized)" onClick={() => setConfirmRemove(t.tractor)}>✕</button>}
+                  </>}
             </div>
+            {moving === t.tractor && (
+              <div className="am-teammove">
+                <span className="am-muted">Next wk — {[t.driver1, t.driver2].filter(Boolean).map((n) => n.split(' ')[0]).join(' / ') || 'team'} on truck #</span>
+                <input className="am-input" style={{ maxWidth: 78 }} value={moveTruck} autoFocus placeholder="new #"
+                  onChange={(e) => setMoveTruck(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === 'Enter' && moveTruck.trim()) { saveTruck({ ...t, tractor: moveTruck.trim(), confirm1: false, confirm2: false, flyer: '' }); setMoving(null); advanceWeek(); flash(`✓ ${[t.driver1, t.driver2].filter(Boolean).map((n) => n.split(' ')[0]).join(' / ')} carried to next week on #${moveTruck.trim()}.`); } if (e.key === 'Escape') setMoving(null); }} />
+                <button className="am-save" disabled={!moveTruck.trim()} title="Create the team on the new truck for next week (drivers kept)"
+                  onClick={() => { saveTruck({ ...t, tractor: moveTruck.trim(), confirm1: false, confirm2: false, flyer: '' }); setMoving(null); advanceWeek(); flash(`✓ ${[t.driver1, t.driver2].filter(Boolean).map((n) => n.split(' ')[0]).join(' / ')} carried to next week on #${moveTruck.trim()}.`); }}>✓ Move</button>
+                <button className="am-clear" onClick={() => setMoving(null)}>✕</button>
+              </div>
+            )}
             {outOfService && <div className="am-oosbadge" title="Blocked from assignment — clear on the Out of Service page">🛠 OUT OF SERVICE · Fleetio</div>}
             <div className="am-drivers-confirm">
               {t.driver1 && <label className={`am-driverchk ${nameCls(!!t.confirm1)}`}><input type="checkbox" checked={!!t.confirm1} onChange={(e) => saveTruck({ ...t, confirm1: e.target.checked })} />{t.driver1}</label>}

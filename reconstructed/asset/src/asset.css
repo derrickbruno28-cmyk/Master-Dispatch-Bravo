@@ -548,6 +548,11 @@
 .am-teamremove { border: none; background: transparent; color: var(--muted); cursor: pointer; font-size: 10px; padding: 0 3px; margin-left: 4px; opacity: 0.55; border-radius: 4px; }
 .am-teamremove:hover { opacity: 1; color: var(--red); background: rgba(245,80,90,0.12); }
 .am-teamremove-c { display: inline-flex; align-items: center; gap: 4px; margin-left: 6px; font-size: 10px; }
+.am-teamnext { border: 1px solid var(--border); background: transparent; color: var(--accent); cursor: pointer; font-size: 9.5px; font-weight: 700; padding: 1px 5px; margin-left: 5px; border-radius: 5px; opacity: 0.8; }
+.am-teamnext:hover { opacity: 1; background: rgba(37,99,235,0.1); }
+.am-teammove { display: flex; align-items: center; gap: 5px; flex-wrap: wrap; margin-top: 4px; font-size: 10.5px; padding: 4px 6px; border: 1px dashed var(--accent); border-radius: 7px; background: rgba(37,99,235,0.05); }
+.am-teammove .am-input { padding: 3px 6px; font-size: 11px; }
+.am-teammove .am-save, .am-teammove .am-clear { padding: 3px 7px; font-size: 10.5px; }
 
 /* ---- Load Repository table ---- */
 .repo-table th, .repo-table td { font-size: 11.5px; vertical-align: top; }
