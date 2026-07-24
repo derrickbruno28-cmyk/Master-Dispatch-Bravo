@@ -569,3 +569,98 @@
 .fleetmap-src { font-size: 9px; font-weight: 700; color: var(--muted); background: var(--panel-2); border: 1px solid var(--border); border-radius: 5px; padding: 1px 5px; white-space: nowrap; }
 .fleetmap-src.live { color: var(--green); border-color: rgba(34,197,94,0.4); }
 .fleetmap-list-note { font-size: 10.5px; color: var(--muted); padding: 8px 6px 4px; line-height: 1.4; }
+
+/* ============ v0.8.0 — Samsara integration, next-route suggestions, map ============ */
+
+/* Next-route suggestions on the planning calendar */
+.am-suggest { position: relative; }
+.am-suggest-badge {
+  width: 100%; border: 1px dashed var(--accent); background: rgba(37,99,235,0.07); color: var(--accent);
+  border-radius: 7px; padding: 5px 6px; font: inherit; font-size: 10.5px; font-weight: 700; cursor: pointer; line-height: 1.25;
+}
+.am-suggest-badge:hover { background: rgba(37,99,235,0.14); }
+.am-suggest-pop {
+  position: absolute; top: calc(100% + 4px); left: 0; z-index: 45; width: 280px;
+  background: var(--panel); border: 1px solid var(--border); border-radius: 10px; box-shadow: 0 14px 34px rgba(0,0,0,0.34); padding: 6px;
+}
+.am-suggest-head { font-size: 11px; font-weight: 800; color: var(--text); padding: 4px 6px 6px; border-bottom: 1px solid var(--border); }
+.am-suggest-item { display: flex; align-items: center; gap: 8px; width: 100%; text-align: left; border: none; background: transparent; color: var(--text); cursor: pointer; padding: 6px; border-radius: 7px; font: inherit; }
+.am-suggest-item:hover { background: var(--panel-2); }
+.am-suggest-item.over { opacity: 0.72; }
+.am-suggest-rank { flex: none; width: 18px; height: 18px; border-radius: 50%; background: var(--accent); color: #fff; font-size: 10px; font-weight: 800; display: flex; align-items: center; justify-content: center; }
+.am-suggest-item.over .am-suggest-rank { background: var(--muted); }
+.am-suggest-main { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.am-suggest-route { font-size: 12px; font-weight: 700; }
+.am-suggest-meta { font-size: 10px; color: var(--muted); }
+.am-suggest-foot { font-size: 9.5px; color: var(--muted); padding: 5px 6px 2px; }
+
+/* Integrations panel */
+.intg-card { background: var(--panel); border: 1px solid var(--border); border-radius: 14px; padding: 14px 16px; margin-bottom: 14px; max-width: 860px; }
+.intg-card-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; margin-bottom: 10px; }
+.intg-card-title { display: flex; align-items: center; gap: 8px; font-size: 15px; font-weight: 800; }
+.intg-card-sub { font-size: 11.5px; font-weight: 600; color: var(--muted); }
+.intg-status-dot { width: 11px; height: 11px; border-radius: 50%; display: inline-block; }
+.intg-key-row { display: flex; gap: 12px; flex-wrap: wrap; }
+.intg-saved-key { display: flex; align-items: center; gap: 10px; font-size: 13px; font-weight: 700; padding: 6px 0; }
+.intg-feature-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; margin: 12px 0 8px; }
+.intg-feature { border: 1px solid var(--border); border-radius: 10px; padding: 9px 11px; background: var(--panel-2); }
+.intg-feature-title { font-size: 12.5px; font-weight: 700; display: flex; align-items: center; gap: 6px; }
+.intg-feature-desc { font-size: 11px; color: var(--muted); margin-top: 3px; line-height: 1.35; }
+.intg-mini-badge { font-size: 8.5px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.4px; color: var(--amber); border: 1px solid var(--amber); border-radius: 4px; padding: 0 4px; }
+.intg-mock-note { font-size: 11.5px; color: var(--muted); background: var(--panel-2); border-radius: 8px; padding: 7px 10px; }
+
+/* Samsara-style Fleet Map */
+.fmap-shell { position: relative; border: 1px solid var(--border); border-radius: 14px; overflow: hidden; background: #0f2233; }
+.fmap-svg { width: 100%; height: 60vh; min-height: 420px; display: block; touch-action: none; cursor: grab; }
+.fmap-svg:active { cursor: grabbing; }
+.fmap-grat { stroke: rgba(255,255,255,0.10); stroke-width: 1; }
+.fmap-svg.terrain .fmap-grat { stroke: rgba(0,0,0,0.10); }
+.fmap-wx-label { font-size: 9px; font-weight: 800; fill: #fff; opacity: 0.75; letter-spacing: 0.5px; }
+.fmap-shield { fill: #0b1220; stroke: #fff; stroke-width: 1; }
+.fmap-shield-txt { fill: #fff; font-size: 9px; font-weight: 800; }
+.fmap-geo { fill: rgba(56,189,248,0.14); stroke: #38bdf8; stroke-width: 1.5; }
+.fmap-geo.yard { stroke: #f59e0b; fill: rgba(245,158,11,0.14); }
+.fmap-geo.terminal { stroke: #a78bfa; fill: rgba(167,139,250,0.14); }
+.fmap-geo.customer { stroke: #22c55e; fill: rgba(34,197,94,0.14); }
+.fmap-geo-label { font-size: 9px; font-weight: 700; fill: #e5e7eb; paint-order: stroke; stroke: #0b1220; stroke-width: 2.5px; }
+.fmap-state { font-size: 12px; font-weight: 800; letter-spacing: 1px; fill: rgba(255,255,255,0.28); }
+.fmap-state.terrain { fill: rgba(30,41,59,0.35); }
+.fmap-city { font-size: 10px; font-weight: 600; fill: rgba(255,255,255,0.82); paint-order: stroke; stroke: #0b1220; stroke-width: 2.5px; }
+.fmap-city.terrain { fill: #1e293b; stroke: #f8fafc; }
+.fmap-citydot { fill: rgba(255,255,255,0.7); }
+.fmap-citydot.terrain { fill: #334155; }
+.fmap-pin { stroke: #fff; stroke-width: 1.5; }
+.fmap-pin.active { stroke-width: 2; }
+.fmap-pin-txt { fill: #fff; font-size: 7.5px; font-weight: 800; pointer-events: none; }
+.fmap-tip-bg { fill: rgba(15,23,42,0.94); stroke: rgba(255,255,255,0.18); }
+.fmap-tip-t { fill: #fff; font-size: 10px; font-weight: 800; }
+.fmap-tip-s { fill: #cbd5e1; font-size: 9px; }
+
+.fmap-controls { position: absolute; top: 12px; right: 12px; background: rgba(17,24,39,0.86); border: 1px solid rgba(255,255,255,0.14); border-radius: 10px; padding: 8px; display: flex; flex-direction: column; gap: 6px; backdrop-filter: blur(4px); }
+.fmap-ctl-seg { display: flex; border: 1px solid rgba(255,255,255,0.2); border-radius: 7px; overflow: hidden; }
+.fmap-ctl-seg button { flex: 1; border: none; background: transparent; color: #cbd5e1; font: inherit; font-size: 11px; font-weight: 700; padding: 5px 10px; cursor: pointer; }
+.fmap-ctl-seg button.on { background: var(--accent); color: #fff; }
+.fmap-ctl-row { display: flex; align-items: center; gap: 6px; font-size: 11.5px; color: #e5e7eb; cursor: pointer; }
+.fmap-zoom { position: absolute; bottom: 14px; right: 12px; display: flex; flex-direction: column; gap: 4px; }
+.fmap-zoom button { width: 32px; height: 32px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.18); background: rgba(17,24,39,0.86); color: #fff; font-size: 16px; cursor: pointer; }
+.fmap-zoom button:hover { background: var(--accent); }
+.fmap-legend { position: absolute; left: 12px; bottom: 12px; background: rgba(17,24,39,0.82); border: 1px solid rgba(255,255,255,0.14); border-radius: 10px; padding: 7px 10px; display: flex; flex-direction: column; gap: 5px; }
+.fmap-legend-row { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; }
+.fmap-legend-item { display: flex; align-items: center; gap: 5px; font-size: 10.5px; color: #e5e7eb; }
+.fmap-legend-cap { font-size: 9px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.5px; color: #94a3b8; }
+.fmap-legend-line { width: 14px; height: 3px; border-radius: 2px; display: inline-block; }
+.fmap-note { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-top: 8px; }
+
+/* Geofence import modal */
+.geo-import-list { max-height: 220px; overflow-y: auto; display: flex; flex-direction: column; gap: 4px; margin: 6px 0; }
+.geo-import-row { display: flex; align-items: center; gap: 9px; padding: 7px 8px; border: 1px solid var(--border); border-radius: 8px; cursor: pointer; }
+.geo-import-row:hover { background: var(--panel-2); }
+.geo-import-row.dim { opacity: 0.6; }
+.geo-import-main { font-size: 12.5px; }
+.geo-chip { font-size: 11px; }
+.geo-chip.yard { color: #f59e0b; } .geo-chip.terminal { color: #a78bfa; } .geo-chip.customer { color: #22c55e; } .geo-chip.other { color: #38bdf8; }
+.geo-preview { margin-top: 8px; }
+.geo-preview-cap { font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.5px; color: var(--muted); margin-bottom: 4px; }
+.geo-preview-svg { width: 100%; height: auto; border-radius: 8px; }
+.geo-preview-bg { fill: #12261b; }
+.geo-preview-lbl { font-size: 9px; fill: #e5e7eb; paint-order: stroke; stroke: #0b1220; stroke-width: 2px; }

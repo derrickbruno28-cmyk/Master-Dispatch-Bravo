@@ -97,3 +97,15 @@ export function getMatches(d: Truck, radius: number, fromCity?: string): Match[]
   }
   return out;
 }
+
+/* Next-route suggestions for the planning calendar — rank routes launching from
+   where a team FINISHES their current trip, gated by their remaining HOS. Fits-
+   in-hours suggestions first, then shortest deadhead, then most homeward. HOS is
+   read from the Samsara adapter by the caller and passed in here. */
+export function nextRouteSuggestions(fromCity: string, homeCity: string, hosHours: number, radius = 600, n = 5): Match[] {
+  if (!fromCity || !findCC(fromCity)) return [];
+  const synth = { currentCity: fromCity, homeCity, hoursAvail: hosHours } as Truck;
+  return getMatches(synth, radius, fromCity)
+    .sort((a, b) => (Number(b.ok) - Number(a.ok)) || (a.dh - b.dh) || (b.hw - a.hw))
+    .slice(0, n);
+}

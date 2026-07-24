@@ -10,6 +10,7 @@ import FleetMapView from './views/FleetMapView';
 import OutOfServiceView from './views/OutOfServiceView';
 import DriversView from './views/DriversView';
 import RolesView from './views/RolesView';
+import SettingsView from './views/SettingsView';
 import FinancialsView, { type FinPage } from './views/FinancialsView';
 import { loadDrivers } from './data/driversStore';
 import { loadFleet } from './data/fleetStore';
@@ -23,10 +24,10 @@ import { onChange } from './data/bus';
    kept minimal, and driver / team / route look-ups are separate filters below
    the header (not one catch-all search box). */
 
-const APP_VERSION = '0.7.0';
+const APP_VERSION = '0.8.0';
 
 type Tab = 'matrix' | 'optimizer' | 'otp' | 'covered' | 'fleet' | 'fleet-map' | 'fleet-oos' | 'drivers' | 'roles'
-  | 'fin-cpm' | 'fin-customer' | 'fin-truck' | 'fin-miles';
+  | 'fin-cpm' | 'fin-customer' | 'fin-truck' | 'fin-miles' | 'integrations';
 
 interface NavItem { key: Tab; label: string; managerOnly?: boolean }
 const NAV_GROUPS: { title: string; items: NavItem[] }[] = [
@@ -37,7 +38,7 @@ const NAV_GROUPS: { title: string; items: NavItem[] }[] = [
     { key: 'covered', label: '✅ Routes Covered' },
   ] },
   { title: 'People', items: [
-    { key: 'drivers', label: '👤 Drivers' },
+    { key: 'drivers', label: '👤 Driver Availability' },
     { key: 'roles', label: '🔑 Roles', managerOnly: true },
   ] },
   { title: 'Fleet', items: [
@@ -50,6 +51,9 @@ const NAV_GROUPS: { title: string; items: NavItem[] }[] = [
     { key: 'fin-customer', label: '🏷 By Customer' },
     { key: 'fin-truck', label: '🚚 By Truck / Team' },
     { key: 'fin-miles', label: '🛣 Driver Miles' },
+  ] },
+  { title: 'Setup', items: [
+    { key: 'integrations', label: '🔌 Integrations' },
   ] },
 ];
 const FIN_PAGE: Partial<Record<Tab, FinPage>> = { 'fin-cpm': 'cpm', 'fin-customer': 'customer', 'fin-truck': 'truck', 'fin-miles': 'miles' };
@@ -215,6 +219,7 @@ export default function App() {
           {tab === 'fleet-oos' && <OutOfServiceView />}
           {tab === 'drivers' && <DriversView seed={seedDrivers} />}
           {tab === 'roles' && showRoles && <RolesView />}
+          {tab === 'integrations' && <SettingsView />}
           {finPageOf(tab) && <FinancialsView page={finPageOf(tab)!} />}
         </main>
       </div>

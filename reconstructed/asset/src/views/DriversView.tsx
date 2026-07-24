@@ -139,7 +139,7 @@ export default function DriversView({ seed }: { seed?: { q: string; nonce: numbe
   return (
     <div className="am-page">
       <div className="am-head">
-        <h2>Master Drivers List</h2>
+        <h2>Driver Availability</h2>
         <input className="am-input" style={{ maxWidth: 240 }} placeholder="Search name / position / constraint…" value={q} onChange={(e) => setQ(e.target.value)} />
         <span className="am-muted">{rows.length} of {drivers.length} drivers</span>
         <span className="drv-availtag"><span className="drv-led" /> {availCount} available</span>

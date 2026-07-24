@@ -12,6 +12,8 @@ import LoadDetailModal from './LoadDetailModal';
 import { loadAll, moveLoadCell, clearLoadCell, type Load } from '../data/loadsStore';
 import { documentStore } from '../integrations/documents';
 import { fleetioClient, localOosList } from '../integrations/telematics';
+import { samsara } from '../integrations/samsara';
+import { nextRouteSuggestions, parseRoute, tripCode, type Match } from '../data/optimize';
 
 /* Asset Matrix — the scheduling board for our OWN trucks.
    Rows = trucks grouped by home terminal (SA / Dallas / Memphis / Houston),
@@ -37,6 +39,11 @@ const STATUS_LABEL: Record<string, string> = {
 
 const DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
+/* "SAN ANTONIO" → "San Antonio" for the suggestion popover */
+function cityTitle(s: string): string {
+  return (s || '').toLowerCase().replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
 export default function AssetMatrixView() {
   const [weekStart, setWeekStart] = useState<Date>(() => mondayOf(new Date()));
   const [assign, setAssign] = useState<Record<string, Assignment>>(() => { ensureSeed(); return loadAssignments(); });
@@ -53,6 +60,8 @@ export default function AssetMatrixView() {
   const [canDel, setCanDel] = useState<boolean>(() => canDelete());
   const [fleet, setFleet] = useState<FleetTruck[]>(() => loadFleet());
   const [oos, setOos] = useState<Set<string>>(new Set());
+  const [hosByTruck, setHosByTruck] = useState<Record<string, number>>({});
+  const [sugCell, setSugCell] = useState<string | null>(null);
 
   /* Fleetio out-of-service set (+ local dispatch overrides) → row lock */
   function refreshOos() {
@@ -62,9 +71,14 @@ export default function AssetMatrixView() {
 
   /* live sync: reload fleet + assignments whenever any store changes (e.g. a team
      is set NTB on the Fleet card) so the matrix stays congruent without a reload */
+  /* HOS per truck (from the Samsara adapter — mock until the backend is wired);
+     drives the ranking + gating of the next-route suggestions */
+  function refreshHos() {
+    void samsara().hos().then((list) => setHosByTruck(Object.fromEntries(list.map((h) => [h.truck, h.hoursAvailable]))));
+  }
   useEffect(() => {
-    refreshOos();
-    return onChange(() => { setFleet(loadFleet()); setAssign(loadAssignments()); setCanDel(canDelete()); refreshOos(); });
+    refreshOos(); refreshHos();
+    return onChange(() => { setFleet(loadFleet()); setAssign(loadAssignments()); setCanDel(canDelete()); refreshOos(); refreshHos(); });
   }, []);
 
   /* rich-load index (cell → Load) + 📎 doc counts for the chips */
@@ -221,6 +235,9 @@ export default function AssetMatrixView() {
                 flash={flash}
                 canDel={canDel}
                 oos={oos}
+                hosByTruck={hosByTruck}
+                sugCell={sugCell}
+                setSugCell={setSugCell}
               />
             ))}
           </tbody>
@@ -244,7 +261,7 @@ export default function AssetMatrixView() {
   );
 }
 
-function TerminalRows({ term, trucks, dates, assign, setEditing, openDispatch, loads, docCounts, save, move, confirmClear, setConfirmClear, flash, canDel, oos }: {
+function TerminalRows({ term, trucks, dates, assign, setEditing, openDispatch, loads, docCounts, save, move, confirmClear, setConfirmClear, flash, canDel, oos, hosByTruck, sugCell, setSugCell }: {
   term: string; trucks: FleetTruck[]; dates: string[];
   assign: Record<string, Assignment>;
   setEditing: (k: string) => void; openDispatch: (k: string) => void;
@@ -253,6 +270,7 @@ function TerminalRows({ term, trucks, dates, assign, setEditing, openDispatch, l
   move: (fromKey: string, toKey: string) => void;
   confirmClear: string | null; setConfirmClear: (k: string | null) => void;
   flash: (msg: string) => void; canDel: boolean; oos: Set<string>;
+  hosByTruck: Record<string, number>; sugCell: string | null; setSugCell: (k: string | null) => void;
 }) {
   const teams = trucks.filter((t) => (t.driver2 || '').trim());
   const solos = trucks.filter((t) => !(t.driver2 || '').trim());
@@ -342,7 +360,42 @@ function TerminalRows({ term, trucks, dates, assign, setEditing, openDispatch, l
                       </div>
                     )}
                   </div>
-                ) : <span className="am-add">+</span>}
+                ) : (() => {
+                  const prevA = di > 0 ? assign[cellKey(t.tractor, dates[di - 1])] : undefined;
+                  if (down || outOfService || !prevA || !prevA.route.trim()) return <span className="am-add">+</span>;
+                  const dest = parseRoute(prevA.route).destination;
+                  const fromCity = dest?.name || '';
+                  if (!fromCity) return <span className="am-add">+</span>;
+                  const hos = hosByTruck[t.tractor] ?? t.hoursAvail ?? 0;
+                  const sugs = nextRouteSuggestions(fromCity, t.homeCity, hos, 600, 5);
+                  if (sugs.length === 0) return <span className="am-add">+</span>;
+                  const open = sugCell === k;
+                  return (
+                    <div className="am-suggest">
+                      <button className="am-suggest-badge" title={`Route Optimizer — next-load ideas from ${cityTitle(fromCity)}, gated by ${hos.toFixed(1)}h HOS`}
+                        onClick={(e) => { e.stopPropagation(); setSugCell(open ? null : k); }}>
+                        🧭 {sugs.length} optimized route suggestions
+                      </button>
+                      {open && (
+                        <div className="am-suggest-pop" onClick={(e) => e.stopPropagation()}>
+                          <div className="am-suggest-head">Next load from {cityTitle(fromCity)} · {hos.toFixed(1)}h HOS left</div>
+                          {sugs.map((s: Match, i: number) => (
+                            <button key={i} className={`am-suggest-item ${s.ok ? '' : 'over'}`}
+                              title={s.ok ? 'Fits remaining hours — click to assign' : 'Exceeds remaining HOS — click to assign anyway'}
+                              onClick={(e) => { e.stopPropagation(); save(k, { route: s.route, status: 'covered', usps: /fa\w+|hcr/i.test(s.route) }); setSugCell(null); }}>
+                              <span className="am-suggest-rank">{i + 1}</span>
+                              <span className="am-suggest-main">
+                                <span className="am-suggest-route">{tripCode(s.route) || s.route}</span>
+                                <span className="am-suggest-meta">{s.oN || '—'} → {s.dN || '—'} · DH {s.dh}mi · {s.hrs}h{s.ok ? '' : ' · over HOS'}</span>
+                              </span>
+                            </button>
+                          ))}
+                          <div className="am-suggest-foot">Ranked by available hours · from Route Optimizer</div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
               </td>
             );
           })}
