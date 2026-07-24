@@ -56,19 +56,12 @@ export default function DriversView({ seed }: { seed?: { q: string; nonce: numbe
     return [...s];
   }, [drivers]);
 
-  /* alerts — who is missing a ready date / a return date, who's due home soon */
+  /* alerts — ONLY the two we care about: who is missing a ready-to-go date and
+     who is missing a return date (no review-flag notes) */
   const alerts = useMemo(() => {
     const noReady = drivers.filter((d) => !d.readyDate);
     const noReturn = drivers.filter((d) => !d.returnDate);
-    const dueSoon = drivers
-      .map((d) => ({ d, left: daysUntil(d.returnDate) }))
-      .filter((x) => x.left !== null && x.left >= 0 && x.left <= 3)
-      .sort((a, b) => (a.left! - b.left!));
-    const overdue = drivers
-      .map((d) => ({ d, left: daysUntil(d.returnDate) }))
-      .filter((x) => x.left !== null && x.left < 0);
-    const flagged = drivers.filter((d) => (d.flag || '').trim());
-    return { noReady, noReturn, dueSoon, overdue, flagged };
+    return { noReady, noReturn };
   }, [drivers]);
 
   const availCount = useMemo(() => [...avail.values()].filter((a) => a.available).length, [avail]);
@@ -119,12 +112,12 @@ export default function DriversView({ seed }: { seed?: { q: string; nonce: numbe
       if (a?.available) return 'Available';
       return !d.readyDate ? 'No ready date' : (a && a.daysLeft !== null && a.daysLeft < 0 ? 'Past due' : 'Out');
     };
-    const cols = ['Name', 'Position', 'Home City', 'Phone', 'Address', 'Constraints', 'Ready Date', 'Return Date', 'Pattern', 'Review Flag', 'Availability', 'Team Status'];
+    const cols = ['Name', 'Position', 'Home City', 'Phone', 'Address', 'Constraints', 'Ready Date', 'Return Date', 'Pattern', 'Availability', 'Team Status'];
     const lines = [cols.join(',')];
     for (const d of rows) {
       lines.push([
         d.name, d.position, d.homeCity, d.phone, d.address, d.constraints,
-        d.readyDate, d.returnDate, d.pattern, d.flag, availLabel(d),
+        d.readyDate, d.returnDate, d.pattern, availLabel(d),
         teamStatusByName.get(d.name.trim().toLowerCase()) || '',
       ].map(esc).join(','));
     }
@@ -150,15 +143,9 @@ export default function DriversView({ seed }: { seed?: { q: string; nonce: numbe
         </div>
       </div>
 
-      {/* availability alerts */}
-      {(alerts.noReady.length > 0 || alerts.noReturn.length > 0 || alerts.dueSoon.length > 0 || alerts.overdue.length > 0 || alerts.flagged.length > 0) && (
+      {/* availability alerts — only missing ready date / missing return date */}
+      {(alerts.noReady.length > 0 || alerts.noReturn.length > 0) && (
         <div className="drv-alerts">
-          {alerts.flagged.length > 0 && (
-            <div className="drv-alert drv-alert-bad">
-              🚩 <b>{alerts.flagged.length}</b> driver{alerts.flagged.length > 1 ? 's' : ''} to review:
-              <span className="drv-alert-names"> {alerts.flagged.map((d) => `${d.name} (${d.flag})`).join(', ')}</span>
-            </div>
-          )}
           {alerts.noReady.length > 0 && (
             <div className="drv-alert drv-alert-warn">
               ⚠ <b>{alerts.noReady.length}</b> driver{alerts.noReady.length > 1 ? 's' : ''} with <b>no ready-to-go date</b>:
@@ -169,18 +156,6 @@ export default function DriversView({ seed }: { seed?: { q: string; nonce: numbe
             <div className="drv-alert drv-alert-warn">
               ⚠ <b>{alerts.noReturn.length}</b> driver{alerts.noReturn.length > 1 ? 's' : ''} with <b>no return date</b>:
               <span className="drv-alert-names"> {alerts.noReturn.map((d) => d.name).join(', ')}</span>
-            </div>
-          )}
-          {alerts.overdue.length > 0 && (
-            <div className="drv-alert drv-alert-bad">
-              🔴 <b>{alerts.overdue.length}</b> past due home:
-              <span className="drv-alert-names"> {alerts.overdue.map((x) => `${x.d.name} (${-x.left!}d over)`).join(', ')}</span>
-            </div>
-          )}
-          {alerts.dueSoon.length > 0 && (
-            <div className="drv-alert drv-alert-soon">
-              ⏰ due home soon:
-              <span className="drv-alert-names"> {alerts.dueSoon.map((x) => `${x.d.name} (${x.left === 0 ? 'today' : `${x.left}d`})`).join(', ')}</span>
             </div>
           )}
         </div>
@@ -228,7 +203,7 @@ export default function DriversView({ seed }: { seed?: { q: string; nonce: numbe
               const a = avail.get(d.id)!;
               return (
                 <tr key={d.id}>
-                  <td className="am-tractor">{d.name}{(d.flag || '').trim() && <span className="drv-flag" title={d.flag}>🚩 {d.flag}</span>}</td>
+                  <td className="am-tractor">{d.name}</td>
                   <td><span className="am-pill" style={{ color: 'var(--accent)' }}>{d.position}</span></td>
                   <td>
                     {(teamStatusByName.get(d.name.trim().toLowerCase()) || '').toLowerCase() === 'ntb' ? (
@@ -317,9 +292,6 @@ function DriverEditor({ driver, isNew, onSave, onCancel }: { driver: Driver; isN
 
         <L t="Constraints (e.g. no NYC · solo only · hazmat · home by Fri)">
           <textarea className="am-input" rows={2} value={d.constraints} onChange={(e) => f('constraints', e.target.value)} />
-        </L>
-        <L t="🚩 Review flag (needs 1-on-1 · unresponsive · off · no terminal … clear when resolved)">
-          <input className="am-input" value={d.flag} onChange={(e) => f('flag', e.target.value)} placeholder="empty = no issue" />
         </L>
         <div className="fleet-modal-btns">
           <button className="am-save" disabled={!d.name.trim()} onClick={() => onSave(d)}>{isNew ? 'Add driver' : 'Save changes'}</button>

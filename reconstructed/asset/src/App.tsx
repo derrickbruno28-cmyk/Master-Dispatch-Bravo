@@ -25,7 +25,7 @@ import { watchForUpdate } from './data/versionCheck';
    kept minimal, and driver / team / route look-ups are separate filters below
    the header (not one catch-all search box). */
 
-const APP_VERSION = '0.14.0';
+const APP_VERSION = '0.14.1';
 
 type Tab = 'matrix' | 'optimizer' | 'otp' | 'covered' | 'fleet' | 'fleet-map' | 'fleet-oos' | 'drivers' | 'roles'
   | 'fin-cpm' | 'fin-customer' | 'fin-truck' | 'fin-miles' | 'integrations';
