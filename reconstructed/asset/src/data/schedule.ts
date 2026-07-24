@@ -94,23 +94,41 @@ export const LOAD_STATUS_LABEL: Record<string, string> = {
   'at receiver': 'At Receiver', delivered: 'Delivered', completed: 'Completed', off: 'Off / Home',
 };
 
-/* A truck's LIVE operational status, read straight from the calendar: today's
-   load wins; otherwise the most recent still-in-progress load (not delivered /
-   completed / off). Returns null when the truck has no active calendar load — the
-   Fleet Status page then falls back to the team's availability status. */
+/* A truck's LIVE operational status, read straight from the calendar. COMPLETED
+   routes are excluded — a finished route drops off Team Status and the team shows
+   its NEXT route (or availability / NTB when it has none, restarting the cycle).
+   Priority: today's route → the next upcoming route → the most recent one.
+   Returns null when the truck has no non-completed calendar route. */
 export function currentLoadStatus(tractor: string, assign?: Record<string, Assignment>): { route: string; status: string; date: string } | null {
   const map = assign ?? readLocal();
   const today = isoDate(new Date());
-  const todayA = map[cellKey(tractor, today)];
-  if (todayA && todayA.route.trim()) return { route: todayA.route, status: todayA.status, date: today };
-  const DONE = new Set(['delivered', 'completed', 'off']);
-  let best: { route: string; status: string; date: string } | null = null;
+  const mine: { route: string; status: string; date: string }[] = [];
   for (const [k, a] of Object.entries(map)) {
     const { tractor: tr, date } = parseCellKey(k);
-    if (tr !== tractor || !a.route.trim() || DONE.has(a.status) || date > today) continue;
-    if (!best || date > best.date) best = { route: a.route, status: a.status, date };
+    if (tr !== tractor || !a.route.trim() || a.status === 'completed') continue;
+    mine.push({ route: a.route, status: a.status, date });
   }
-  return best;
+  if (!mine.length) return null;
+  const todayA = mine.find((m) => m.date === today);
+  if (todayA) return todayA;
+  const future = mine.filter((m) => m.date > today).sort((a, b) => (a.date < b.date ? -1 : 1));
+  if (future.length) return future[0];        // the team's next route
+  const past = mine.filter((m) => m.date < today).sort((a, b) => (a.date > b.date ? -1 : 1));
+  return past[0] ?? null;                       // most recent otherwise
+}
+
+/* completed calendar routes for a truck within a date range (Team Status →
+   "completed loads" browser). Reads straight from the schedule assignments. */
+export function completedLoadsInRange(from: string, to: string, assign?: Record<string, Assignment>): { tractor: string; route: string; date: string }[] {
+  const map = assign ?? readLocal();
+  const out: { tractor: string; route: string; date: string }[] = [];
+  for (const [k, a] of Object.entries(map)) {
+    if (a.status !== 'completed' || !a.route.trim()) continue;
+    const { tractor, date } = parseCellKey(k);
+    if ((from && date < from) || (to && date > to)) continue;
+    out.push({ tractor, route: a.route, date });
+  }
+  return out.sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : a.tractor.localeCompare(b.tractor)));
 }
 
 /* Single write path. Updates the browser copy (demo) and, when live, the shared

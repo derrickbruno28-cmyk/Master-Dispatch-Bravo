@@ -8,7 +8,15 @@ import { getOptions, addOption, type OptionKind } from '../data/optionsStore';
 import { canDelete } from '../data/permStore';
 import { onChange } from '../data/bus';
 import { useEffect } from 'react';
-import { loadAssignments, currentLoadStatus, LOAD_STATUS_COLOR, LOAD_STATUS_LABEL, type Assignment } from '../data/schedule';
+import { loadAssignments, currentLoadStatus, completedLoadsInRange, LOAD_STATUS_COLOR, LOAD_STATUS_LABEL, type Assignment } from '../data/schedule';
+
+/* pre-dispatch calendar statuses read as "Assigned — NTD" on Team Status,
+   matching the Asset Matrix row chip. */
+const PRE_DISPATCH = ['unassigned', 'open', 'covered'];
+const calLabel = (s: string) => PRE_DISPATCH.includes(s) ? 'Assigned — NTD' : (LOAD_STATUS_LABEL[s] ?? s);
+const calColor = (s: string) => PRE_DISPATCH.includes(s) ? '#2f80c2' : (LOAD_STATUS_COLOR[s] ?? 'var(--muted)');
+const isoT = () => new Date().toISOString().slice(0, 10);
+const daysBack = (n: number) => { const d = new Date(); d.setDate(d.getDate() - n); return d.toISOString().slice(0, 10); };
 
 /* Fleet Status = the team admin console. Add / edit / remove teams. Driver names
    autofill from the Master Drivers List; the Type / Home terminal / Status
@@ -44,6 +52,10 @@ export default function FleetStatusView({ seed }: { seed?: { q: string; nonce: n
   const [isNew, setIsNew] = useState(false);
   const [confirmDel, setConfirmDel] = useState<string | null>(null);
   const [canDel, setCanDel] = useState<boolean>(() => canDelete());
+  const [showCompleted, setShowCompleted] = useState(false);
+  const [from, setFrom] = useState<string>(() => daysBack(30));
+  const [to, setTo] = useState<string>(() => isoT());
+  const completed = useMemo(() => completedLoadsInRange(from, to, assign), [from, to, assign]);
 
   /* keep delete access + roster + live calendar in sync (role switch / driver
      home-city edits / a load status changed on the Asset Matrix) */
@@ -67,9 +79,39 @@ export default function FleetStatusView({ seed }: { seed?: { q: string; nonce: n
         <h2>Team Status</h2>
         <input className="am-input" style={{ maxWidth: 220 }} placeholder="Search team / driver / city…" value={q} onChange={(e) => setQ(e.target.value)} />
         <span className="am-muted">{rows.length} of {fleet.length} teams</span>
-        <span className="am-muted fleet-status-hint">Status reads live from the load on the calendar — update it on the Asset Matrix. Availability (NTB / Deadhead / Shutdown) shows when a truck has no active load.</span>
+        <span className="am-muted fleet-status-hint">Status reads live from the route on the calendar — update it on the Asset Matrix. Completed routes drop off (team shows its next route or NTB). Availability (NTB / Deadhead / Shutdown) shows when a truck has no active load.</span>
+        <button className={`am-clear${showCompleted ? ' on' : ''}`} onClick={() => setShowCompleted((s) => !s)}>✅ {showCompleted ? 'Hide' : 'Show'} completed loads</button>
         <button className="am-save fleet-add" onClick={() => { setEditing(blankTruck()); setIsNew(true); }}>＋ Add Team</button>
       </div>
+
+      {showCompleted && (
+        <div className="fleet-completed">
+          <div className="fleet-completed-head">
+            <b>Completed loads</b>
+            <label className="otp-field"><span className="otp-field-label">From</span><input className="am-input" type="date" value={from} onChange={(e) => setFrom(e.target.value)} /></label>
+            <label className="otp-field"><span className="otp-field-label">To</span><input className="am-input" type="date" value={to} onChange={(e) => setTo(e.target.value)} /></label>
+            <div className="loads-quick">
+              <button className="am-clear" onClick={() => { setFrom(daysBack(7)); setTo(isoT()); }}>7d</button>
+              <button className="am-clear" onClick={() => { setFrom(daysBack(30)); setTo(isoT()); }}>30d</button>
+              <button className="am-clear" onClick={() => { setFrom(daysBack(90)); setTo(isoT()); }}>90d</button>
+            </div>
+            <span className="am-muted">{completed.length} completed in range</span>
+          </div>
+          <table className="am-grid am-fleet">
+            <thead><tr><th>Date</th><th>Truck</th><th>Route</th></tr></thead>
+            <tbody>
+              {completed.length === 0 && <tr><td colSpan={3} className="am-muted" style={{ textAlign: 'center', padding: 14 }}>No completed routes in this date range.</td></tr>}
+              {completed.map((c, i) => (
+                <tr key={`${c.tractor}-${c.date}-${i}`}>
+                  <td className="am-muted">{c.date}</td>
+                  <td className="am-tractor">#{c.tractor}</td>
+                  <td>{c.route}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
 
       <div className="am-scroll">
         <table className="am-grid am-fleet">
@@ -94,12 +136,12 @@ export default function FleetStatusView({ seed }: { seed?: { q: string; nonce: n
                 <td>{(() => {
                   const cal = currentLoadStatus(t.tractor, assign);
                   if (cal) return (
-                    <span className="am-pill" style={{ color: LOAD_STATUS_COLOR[cal.status] ?? 'var(--muted)' }}
-                      title={`From the calendar — ${cal.route}${cal.date ? ` (${cal.date})` : ''}. Change it on the Asset Matrix.`}>
-                      {LOAD_STATUS_LABEL[cal.status] ?? cal.status}<span className="am-muted fleet-status-src"> · calendar</span>
+                    <span className="am-pill" style={{ color: calColor(cal.status) }}
+                      title={`From the calendar — ${cal.route}${cal.date ? ` (${cal.date})` : ''}. Change it on the Asset Matrix. Completed routes drop off here.`}>
+                      {calLabel(cal.status)}<span className="am-muted fleet-status-src"> · calendar</span>
                     </span>
                   );
-                  return <span className="am-pill" style={{ color: teamStatusMeta(t.status).color }} title="Availability status — no active load on the calendar">{teamStatusMeta(t.status).label}</span>;
+                  return <span className="am-pill" style={{ color: teamStatusMeta(t.status).color }} title="Availability status — no active (non-completed) load on the calendar">{teamStatusMeta(t.status).label}</span>;
                 })()}</td>
                 <td className="fleet-constraints">{t.constraints || <span className="am-muted">—</span>}</td>
                 <td className="fleet-actions">

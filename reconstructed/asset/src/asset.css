@@ -593,6 +593,12 @@
 :root[data-theme="light"] .am-trailer { color: #0b6aa2; }
 .load-trailer-input.has-trailer { border-color: #7cc4f0; }
 
+/* ---- Team Status → completed-loads browser ---- */
+.fleet-completed { margin: 6px 0 16px; padding: 12px 14px; border: 1px solid var(--border); border-radius: 12px; background: var(--panel-2, var(--panel)); }
+.fleet-completed-head { display: flex; gap: 12px; align-items: flex-end; flex-wrap: wrap; margin-bottom: 10px; }
+.fleet-completed-head > b { font-size: 13px; align-self: center; }
+.am-clear.on { border-color: var(--green); color: var(--green); background: rgba(46,160,67,0.10); }
+
 /* ---- Loads page (date-range ledger + completion) ---- */
 .loads-filter { display: flex; gap: 10px; align-items: flex-end; flex-wrap: wrap; }
 .loads-quick { display: flex; gap: 4px; }
