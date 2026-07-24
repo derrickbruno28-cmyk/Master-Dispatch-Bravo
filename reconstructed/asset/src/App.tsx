@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useTheme } from './theme';
 import { firebaseEnabled } from './firebase';
 import AssetMatrixView from './views/AssetMatrixView';
@@ -19,110 +19,152 @@ import { onChange } from './data/bus';
 
 /* Asset Matrix — the asset-side master dispatch. Standalone: it holds our own
    trucks, the USPS route data, scheduling, driver availability, and the route
-   optimizer. It no longer bundles the Bravo (brokerage) board — Caleb maps the
-   asset schedule into his live Bravo Matrix on his own system. This app is the
-   single source for OUR asset data. */
+   optimizer. Navigation lives in a collapsible left side panel; the top bar is
+   kept minimal, and driver / team / route look-ups are separate filters below
+   the header (not one catch-all search box). */
 
-const APP_VERSION = '0.6.0';
+const APP_VERSION = '0.7.0';
 
 type Tab = 'matrix' | 'optimizer' | 'otp' | 'covered' | 'fleet' | 'fleet-map' | 'fleet-oos' | 'drivers' | 'roles'
   | 'fin-cpm' | 'fin-customer' | 'fin-truck' | 'fin-miles';
-const TABS: { key: Tab; label: string; managerOnly?: boolean }[] = [
-  { key: 'matrix', label: '🗓 Asset Matrix' },
-  { key: 'optimizer', label: '⚡ Route Optimizer' },
-  { key: 'otp', label: '📊 OTP / OTD' },
-  { key: 'covered', label: '✅ Routes Covered' },
-  { key: 'drivers', label: '👤 Drivers' },
-  { key: 'roles', label: '🔑 Roles', managerOnly: true },
-];
-/* Fleet ▾ — Trucks/Fleet Status · Fleet Map (live GPS) · Out-of-Service (Fleetio) */
-const FLEET_ITEMS: { key: Tab; label: string }[] = [
-  { key: 'fleet', label: '🚛 Fleet Status' },
-  { key: 'fleet-map', label: '🗺 Fleet Map (live GPS)' },
-  { key: 'fleet-oos', label: '🛠 Out of Service' },
-];
-const isFleetTab = (t: Tab) => FLEET_ITEMS.some((f) => f.key === t);
-/* Financials ▾ — a dropdown, not full-width tabs (per the nav-restructure spec) */
-const FIN_ITEMS: { key: Tab; page: FinPage; label: string }[] = [
-  { key: 'fin-cpm', page: 'cpm', label: 'Revenue / CPM' },
-  { key: 'fin-customer', page: 'customer', label: 'Revenue by Customer' },
-  { key: 'fin-truck', page: 'truck', label: 'Revenue by Truck / Team' },
-  { key: 'fin-miles', page: 'miles', label: 'Driver Miles' },
-];
-const finPageOf = (t: Tab): FinPage | null => FIN_ITEMS.find((f) => f.key === t)?.page ?? null;
 
-interface Hit { kind: 'driver' | 'team' | 'route'; label: string; sub: string; q: string; go: Tab }
+interface NavItem { key: Tab; label: string; managerOnly?: boolean }
+const NAV_GROUPS: { title: string; items: NavItem[] }[] = [
+  { title: 'Dispatch', items: [
+    { key: 'matrix', label: '🗓 Asset Matrix' },
+    { key: 'optimizer', label: '⚡ Route Optimizer' },
+    { key: 'otp', label: '📊 OTP / OTD' },
+    { key: 'covered', label: '✅ Routes Covered' },
+  ] },
+  { title: 'People', items: [
+    { key: 'drivers', label: '👤 Drivers' },
+    { key: 'roles', label: '🔑 Roles', managerOnly: true },
+  ] },
+  { title: 'Fleet', items: [
+    { key: 'fleet', label: '🚛 Fleet Status' },
+    { key: 'fleet-map', label: '🗺 Fleet Map' },
+    { key: 'fleet-oos', label: '🛠 Out of Service' },
+  ] },
+  { title: 'Financials', items: [
+    { key: 'fin-cpm', label: '💰 Revenue / CPM' },
+    { key: 'fin-customer', label: '🏷 By Customer' },
+    { key: 'fin-truck', label: '🚚 By Truck / Team' },
+    { key: 'fin-miles', label: '🛣 Driver Miles' },
+  ] },
+];
+const FIN_PAGE: Partial<Record<Tab, FinPage>> = { 'fin-cpm': 'cpm', 'fin-customer': 'customer', 'fin-truck': 'truck', 'fin-miles': 'miles' };
+const finPageOf = (t: Tab): FinPage | null => FIN_PAGE[t] ?? null;
+
+interface Hit { key: string; label: string; sub: string }
+
+/* one labelled look-up field with its own results dropdown (drivers / teams /
+   routes each get their own, instead of a single universal search box) */
+function LookupField({ icon, label, placeholder, hits, onPick }: {
+  icon: string; label: string; placeholder: string;
+  hits: (q: string) => Hit[]; onPick: (h: Hit) => void;
+}) {
+  const [q, setQ] = useState('');
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const d = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false); };
+    document.addEventListener('mousedown', d);
+    return () => document.removeEventListener('mousedown', d);
+  }, []);
+  const results = q.trim() ? hits(q.trim().toLowerCase()).slice(0, 8) : [];
+  const choose = (h: Hit) => { onPick(h); setQ(''); setOpen(false); };
+  return (
+    <div className="lookup-field" ref={ref}>
+      <span className="lookup-cap">{icon} {label}</span>
+      <div className="lookup-inputwrap">
+        <input
+          className="lookup-input" placeholder={placeholder} value={q}
+          onChange={(e) => { setQ(e.target.value); setOpen(true); }}
+          onFocus={() => setOpen(true)}
+          onKeyDown={(e) => { if (e.key === 'Enter' && results[0]) choose(results[0]); if (e.key === 'Escape') { setQ(''); setOpen(false); } }}
+        />
+        {q && <button className="lookup-clear" title="Clear" onClick={() => { setQ(''); setOpen(false); }}>✕</button>}
+        {open && q.trim() && (
+          <div className="lookup-menu">
+            {results.length === 0
+              ? <div className="lookup-empty">No {label.toLowerCase()} matches “{q.trim()}”.</div>
+              : results.map((h, i) => (
+                <button key={i} className="lookup-item" onMouseDown={(e) => { e.preventDefault(); choose(h); }}>
+                  <span className="lookup-item-label">{h.label}</span>
+                  {h.sub && <span className="lookup-item-sub">{h.sub}</span>}
+                </button>
+              ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
 
 export default function App() {
   const [tab, setTab] = useState<Tab>('matrix');
   const { theme, toggle } = useTheme();
-  const [query, setQuery] = useState('');
-  const [openResults, setOpenResults] = useState(false);
-  const [finOpen, setFinOpen] = useState(false);
-  const [fleetOpen, setFleetOpen] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState<boolean>(() => (typeof window !== 'undefined' ? window.innerWidth > 820 : true));
   const [seedDrivers, setSeedDrivers] = useState<{ q: string; nonce: number }>({ q: '', nonce: 0 });
   const [seedFleet, setSeedFleet] = useState<{ q: string; nonce: number }>({ q: '', nonce: 0 });
   const [, force] = useState(0);
-  const searchRef = useRef<HTMLDivElement>(null);
 
-  /* re-render on any store change so Roles-tab visibility + search data stay live */
+  /* re-render on any store change so Roles-tab visibility + look-up data stay live */
   useEffect(() => onChange(() => force((n) => n + 1)), []);
 
-  /* close the results dropdown on an outside click */
+  /* collapse the drawer when the window shrinks to mobile so it doesn't sit open over content */
   useEffect(() => {
-    function onDoc(e: MouseEvent) { if (searchRef.current && !searchRef.current.contains(e.target as Node)) setOpenResults(false); }
-    document.addEventListener('mousedown', onDoc);
-    return () => document.removeEventListener('mousedown', onDoc);
+    const onResize = () => { if (window.innerWidth <= 820) setSidebarOpen(false); };
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
   }, []);
 
   const showRoles = canManageRoles();
-  const visibleTabs = TABS.filter((t) => !t.managerOnly || showRoles);
   /* if the current tab just became hidden (role changed), fall back to the matrix */
   useEffect(() => { if (tab === 'roles' && !showRoles) setTab('matrix'); }, [tab, showRoles]);
 
-  /* ---- global search across drivers, teams, and routes ---- */
-  const hits = useMemo<Hit[]>(() => {
-    const n = query.trim().toLowerCase();
-    if (n.length < 1) return [];
+  const onMobile = () => typeof window !== 'undefined' && window.innerWidth <= 820;
+  function go(t: Tab) { setTab(t); if (onMobile()) setSidebarOpen(false); }
+
+  /* ---- separate look-ups: drivers, teams, routes ---- */
+  function driverHits(n: string): Hit[] {
     const out: Hit[] = [];
-    let c = 0;
     for (const d of loadDrivers()) {
       if (`${d.name} ${d.position} ${d.homeCity} ${d.constraints}`.toLowerCase().includes(n)) {
-        out.push({ kind: 'driver', label: d.name, sub: [d.position, d.homeCity].filter(Boolean).join(' · '), q: d.name, go: 'drivers' });
-        if (++c >= 6) break;
-      }
-    }
-    c = 0;
-    for (const t of loadFleet()) {
-      if (`${t.tractor} ${t.driver1} ${t.driver2} ${t.homeCity} ${t.currentCity} ${t.type} ${t.constraints}`.toLowerCase().includes(n)) {
-        out.push({ kind: 'team', label: `#${t.tractor}`, sub: [t.driver1, t.driver2].filter(Boolean).join(' · ') || t.type, q: t.tractor, go: 'fleet' });
-        if (++c >= 6) break;
-      }
-    }
-    c = 0;
-    for (const r of ROUTES) {
-      if (r.route.toLowerCase().includes(n)) {
-        out.push({ kind: 'route', label: r.route, sub: [r.freq, r.miles ? `${r.miles} mi` : ''].filter(Boolean).join(' · '), q: r.route, go: 'matrix' });
-        if (++c >= 6) break;
+        out.push({ key: d.name, label: d.name, sub: [d.position, d.homeCity].filter(Boolean).join(' · ') });
+        if (out.length >= 8) break;
       }
     }
     return out;
-  }, [query]);
-
-  function pick(h: Hit) {
-    if (h.go === 'drivers') setSeedDrivers({ q: h.q, nonce: Date.now() });
-    if (h.go === 'fleet') setSeedFleet({ q: h.q, nonce: Date.now() });
-    setTab(h.go);
-    setQuery(''); setOpenResults(false);
   }
-
-  const groups: { kind: Hit['kind']; title: string }[] = [
-    { kind: 'driver', title: 'Drivers' }, { kind: 'team', title: 'Teams' }, { kind: 'route', title: 'Routes' },
-  ];
+  function teamHits(n: string): Hit[] {
+    const out: Hit[] = [];
+    for (const t of loadFleet()) {
+      if (`${t.tractor} ${t.driver1} ${t.driver2} ${t.homeCity} ${t.currentCity} ${t.type} ${t.constraints}`.toLowerCase().includes(n)) {
+        out.push({ key: t.tractor, label: `#${t.tractor}`, sub: [t.driver1, t.driver2].filter(Boolean).join(' · ') || t.type });
+        if (out.length >= 8) break;
+      }
+    }
+    return out;
+  }
+  function routeHits(n: string): Hit[] {
+    const out: Hit[] = [];
+    for (const r of ROUTES) {
+      if (r.route.toLowerCase().includes(n)) {
+        out.push({ key: r.route, label: r.route, sub: [r.freq, r.miles ? `${r.miles} mi` : ''].filter(Boolean).join(' · ') });
+        if (out.length >= 8) break;
+      }
+    }
+    return out;
+  }
+  function pickDriver(h: Hit) { setSeedDrivers({ q: h.key, nonce: Date.now() }); go('drivers'); }
+  function pickTeam(h: Hit) { setSeedFleet({ q: h.key, nonce: Date.now() }); go('fleet'); }
+  function pickRoute(_h: Hit) { go('matrix'); }
 
   return (
-    <div className="asset-shell">
+    <div className={`asset-shell ${sidebarOpen ? 'sb-open' : ''}`}>
       <header className="asset-topbar">
+        <button className="asset-menu" onClick={() => setSidebarOpen((o) => !o)} title={sidebarOpen ? 'Hide menu' : 'Show menu'} aria-label="Toggle navigation">☰</button>
         <div className="asset-brand">
           <span className="asset-logo">GH</span>
           <div>
@@ -130,86 +172,52 @@ export default function App() {
             <div className="asset-sub">Asset Ops Master Dispatch · v{APP_VERSION}</div>
           </div>
         </div>
-
-        <div className="asset-search" ref={searchRef}>
-          <span className="asset-search-icon">🔎</span>
-          <input
-            className="asset-search-input"
-            placeholder="Search drivers, teams, routes…"
-            value={query}
-            onChange={(e) => { setQuery(e.target.value); setOpenResults(true); }}
-            onFocus={() => setOpenResults(true)}
-            onKeyDown={(e) => { if (e.key === 'Enter' && hits[0]) pick(hits[0]); if (e.key === 'Escape') { setQuery(''); setOpenResults(false); } }}
-          />
-          {query && <button className="asset-search-clear" title="Clear" onClick={() => { setQuery(''); setOpenResults(false); }}>✕</button>}
-          {openResults && query.trim() && (
-            <div className="asset-search-results">
-              {hits.length === 0 ? (
-                <div className="asset-search-empty">No matches for “{query.trim()}”.</div>
-              ) : groups.map((g) => {
-                const rows = hits.filter((h) => h.kind === g.kind);
-                if (!rows.length) return null;
-                return (
-                  <div key={g.kind} className="asset-search-group">
-                    <div className="asset-search-grouphead">{g.title}</div>
-                    {rows.map((h, i) => (
-                      <button key={g.kind + i} className="asset-search-item" onMouseDown={(e) => { e.preventDefault(); pick(h); }}>
-                        <span className="asset-search-item-label">{h.label}</span>
-                        {h.sub && <span className="asset-search-item-sub">{h.sub}</span>}
-                      </button>
-                    ))}
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </div>
-
-        <nav className="asset-tabs">
-          {visibleTabs.map((t) => (
-            <button key={t.key} className={`asset-tab ${tab === t.key ? 'on' : ''}`} onClick={() => setTab(t.key)}>
-              {t.label}
-            </button>
-          ))}
-          <span className="asset-dropdown" onMouseLeave={() => setFleetOpen(false)}>
-            <button className={`asset-tab ${isFleetTab(tab) ? 'on' : ''}`} onClick={() => setFleetOpen((o) => !o)}>🚛 Fleet ▾</button>
-            {fleetOpen && (
-              <div className="asset-dropdown-menu">
-                {FLEET_ITEMS.map((f) => (
-                  <button key={f.key} className={`asset-dropdown-item ${tab === f.key ? 'on' : ''}`} onClick={() => { setTab(f.key); setFleetOpen(false); }}>{f.label}</button>
-                ))}
-              </div>
-            )}
-          </span>
-          <span className="asset-dropdown" onMouseLeave={() => setFinOpen(false)}>
-            <button className={`asset-tab ${finPageOf(tab) ? 'on' : ''}`} onClick={() => setFinOpen((o) => !o)}>💰 Financials ▾</button>
-            {finOpen && (
-              <div className="asset-dropdown-menu">
-                {FIN_ITEMS.map((f) => (
-                  <button key={f.key} className={`asset-dropdown-item ${tab === f.key ? 'on' : ''}`} onClick={() => { setTab(f.key); setFinOpen(false); }}>{f.label}</button>
-                ))}
-              </div>
-            )}
-          </span>
-        </nav>
         <div className="asset-right">
           <button className="asset-icon-btn" onClick={toggle} title="Toggle light / dark">{theme === 'dark' ? '☀' : '☾'}</button>
           {!firebaseEnabled && <span className="asset-demo">DEMO</span>}
         </div>
       </header>
 
-      <main className="asset-main">
-        {tab === 'matrix' && <AssetMatrixView />}
-        {tab === 'optimizer' && <RouteOptimizerView />}
-        {tab === 'otp' && <OTPView />}
-        {tab === 'covered' && <CoveredView />}
-        {tab === 'fleet' && <FleetStatusView seed={seedFleet} />}
-        {tab === 'fleet-map' && <FleetMapView />}
-        {tab === 'fleet-oos' && <OutOfServiceView />}
-        {tab === 'drivers' && <DriversView seed={seedDrivers} />}
-        {tab === 'roles' && showRoles && <RolesView />}
-        {finPageOf(tab) && <FinancialsView page={finPageOf(tab)!} />}
-      </main>
+      {/* separate look-up filters (below the header, not a universal search bar) */}
+      <div className="asset-lookups">
+        <span className="lookups-title">Look up</span>
+        <LookupField icon="👤" label="Driver" placeholder="driver name…" hits={driverHits} onPick={pickDriver} />
+        <LookupField icon="🚛" label="Team" placeholder="truck # or driver…" hits={teamHits} onPick={pickTeam} />
+        <LookupField icon="🛣" label="Route" placeholder="route / trip…" hits={routeHits} onPick={pickRoute} />
+      </div>
+
+      <div className="asset-body">
+        <aside className="asset-sidebar">
+          <nav className="asset-nav">
+            {NAV_GROUPS.map((g) => {
+              const items = g.items.filter((it) => !it.managerOnly || showRoles);
+              if (!items.length) return null;
+              return (
+                <div key={g.title} className="nav-group">
+                  <div className="nav-group-title">{g.title}</div>
+                  {items.map((it) => (
+                    <button key={it.key} className={`nav-item ${tab === it.key ? 'on' : ''}`} onClick={() => go(it.key)}>{it.label}</button>
+                  ))}
+                </div>
+              );
+            })}
+          </nav>
+        </aside>
+        <div className="asset-scrim" onClick={() => setSidebarOpen(false)} />
+
+        <main className="asset-main">
+          {tab === 'matrix' && <AssetMatrixView />}
+          {tab === 'optimizer' && <RouteOptimizerView />}
+          {tab === 'otp' && <OTPView />}
+          {tab === 'covered' && <CoveredView />}
+          {tab === 'fleet' && <FleetStatusView seed={seedFleet} />}
+          {tab === 'fleet-map' && <FleetMapView />}
+          {tab === 'fleet-oos' && <OutOfServiceView />}
+          {tab === 'drivers' && <DriversView seed={seedDrivers} />}
+          {tab === 'roles' && showRoles && <RolesView />}
+          {finPageOf(tab) && <FinancialsView page={finPageOf(tab)!} />}
+        </main>
+      </div>
     </div>
   );
 }
