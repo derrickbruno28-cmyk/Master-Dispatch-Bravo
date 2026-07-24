@@ -1,8 +1,16 @@
 /* Master Drivers List — the roster + a driver-availability hub. Each driver has
    a ready-to-go date, a return date, and a weekly availability pattern. Names
    here autofill the Fleet team card; a driver whose team has a route on the
-   Asset Matrix shows ASSIGNED here so they can't be double-booked. */
+   Asset Matrix shows ASSIGNED here so they can't be double-booked.
 
+   SHARED DATA: when Firebase is configured this roster lives in the Firestore
+   `assetDrivers` collection and live-syncs across everyone (onSnapshot) — a
+   teammate editing a driver's ready/return date shows up for the whole team in
+   real time. In demo (no Firebase) it falls back to localStorage. Same pattern
+   as the user roster (usersStore). */
+
+import { db, firebaseEnabled } from '../firebase';
+import { collection, doc, onSnapshot, setDoc, deleteDoc } from 'firebase/firestore';
 import { loadFleet } from './fleetStore';
 import { loadAssignments, parseCellKey } from './schedule';
 import { emitChange } from './bus';
@@ -31,11 +39,8 @@ export const DEFAULT_POSITIONS = [
 export const AVAIL_PATTERNS = ['Mon–Sat', 'Tue–Sun', 'Sun–Fri', 'Wed–Mon', '5 Days', 'Running Wild'];
 
 const KEY = 'asset-drivers-v2';   // v2 = seeded from the real MASTER DISPATCH roster
+const COL = 'assetDrivers';       // shared Firestore collection
 
-function read(): Driver[] {
-  try { const r = localStorage.getItem(KEY); if (r) return (JSON.parse(r) as Driver[]).map(norm); } catch { /* ignore */ }
-  return seedFromSheet();
-}
 function norm(d: Partial<Driver>): Driver {
   return { id: d.id ?? `drv-${Math.random().toString(36).slice(2)}`, name: d.name ?? '', position: d.position ?? 'OTR Team', homeCity: d.homeCity ?? cityFromAddress(d.address ?? ''), address: d.address ?? '', phone: d.phone ?? '', constraints: d.constraints ?? '', readyDate: d.readyDate ?? '', returnDate: d.returnDate ?? '', pattern: d.pattern ?? '', flag: d.flag ?? '' };
 }
@@ -63,7 +68,50 @@ export function cityKey(city: string): string { return (city || '').toLowerCase(
 function seedFromSheet(): Driver[] {
   return DRIVER_SEED.map((d, i) => norm({ id: `drv-${i}`, ...d })).sort((a, b) => a.name.localeCompare(b.name));
 }
-function write(list: Driver[]) { try { localStorage.setItem(KEY, JSON.stringify(list)); } catch { /* ignore */ } emitChange(); }
+const byName = (a: Driver, b: Driver) => a.name.localeCompare(b.name);
+
+/* ---- shared cache (Firestore-backed when live, localStorage in demo) ---- */
+function readLocal(): Driver[] | null {
+  try { const r = localStorage.getItem(KEY); if (r) return (JSON.parse(r) as Driver[]).map(norm); } catch { /* ignore */ }
+  return null;
+}
+function writeLocal() { try { localStorage.setItem(KEY, JSON.stringify(cache)); } catch { /* ignore */ } }
+
+/* pre-hydration placeholder: last-known local copy, else the build's seed roster
+   (in live mode the onSnapshot below replaces this within a second) */
+let cache: Driver[] = readLocal() ?? seedFromSheet();
+let synced = false;
+let hydrated = false;   // true once Firestore's first snapshot has arrived
+
+/* live-subscribe to the shared roster (once). On an EMPTY collection (first ever
+   run) seed it from the build's master list — idempotent by doc id, so it's safe
+   even if two clients race. */
+export function startDriversSync() {
+  if (synced || !firebaseEnabled || !db) return;
+  synced = true;
+  const database = db;
+  onSnapshot(collection(database, COL), (snap) => {
+    if (snap.empty && !hydrated) {
+      hydrated = true;
+      for (const d of seedFromSheet()) {
+        setDoc(doc(database, COL, d.id), d as unknown as Record<string, unknown>).catch((e) => console.error('driver seed failed', e));
+      }
+      return; // the seed writes re-fire this snapshot with the data
+    }
+    hydrated = true;
+    cache = snap.docs.map((d) => norm({ ...(d.data() as Partial<Driver>), id: d.id })).sort(byName);
+    emitChange();
+  }, (e) => console.error('drivers sync failed', e));
+}
+if (firebaseEnabled) startDriversSync();
+
+function read(): Driver[] { return cache; }
+
+/* persist one driver — a single Firestore doc when live, whole list in demo */
+function persistOne(d: Driver) {
+  if (firebaseEnabled && db) setDoc(doc(db, COL, d.id), d as unknown as Record<string, unknown>).catch((e) => console.error('driver write failed', e));
+  else writeLocal();
+}
 
 /* The team status of the truck this driver is on (NTB / Deadhead / …), so the
    drivers list can stay congruent with the Fleet card and the Matrix. */
@@ -80,11 +128,20 @@ export function driverByName(name: string): Driver | undefined {
   return read().find((d) => d.name.toLowerCase() === n);
 }
 export function saveDriver(d: Driver) {
-  const list = read(); const i = list.findIndex((x) => x.id === d.id);
-  if (i >= 0) list[i] = d; else list.push(d);
-  write(list); return list;
+  const nd = norm(d);
+  const i = cache.findIndex((x) => x.id === nd.id);
+  cache = (i >= 0 ? cache.map((x) => (x.id === nd.id ? nd : x)) : [...cache, nd]).sort(byName);
+  persistOne(nd);
+  emitChange();
+  return cache;
 }
-export function removeDriver(id: string) { const list = read().filter((d) => d.id !== id); write(list); return list; }
+export function removeDriver(id: string) {
+  cache = cache.filter((d) => d.id !== id);
+  if (firebaseEnabled && db) deleteDoc(doc(db, COL, id)).catch((e) => console.error('driver delete failed', e));
+  else writeLocal();
+  emitChange();
+  return cache;
+}
 export function blankDriver(): Driver { return norm({ id: `drv-${Date.now()}` }); }
 
 /* ---- availability ---- */
@@ -138,7 +195,8 @@ export function importDriversCsv(text: string): { added: number; updated: number
     iAddr = idx(['address'], 3), iPhone = idx(['phone', 'cell'], 4), iCon = idx(['constraints', 'constraint'], 5),
     iReady = idx(['ready', 'readydate', 'ready to go'], 6), iRet = idx(['return', 'returndate'], 7), iPat = idx(['pattern', 'schedule'], 8);
 
-  const list = read(); const byName = new Map(list.map((d) => [d.name.toLowerCase(), d]));
+  const list = read().map((d) => ({ ...d })); const nameMap = new Map(list.map((d) => [d.name.toLowerCase(), d]));
+  const affected: Driver[] = [];
   let added = 0, updated = 0;
   const normDate = (s: string) => { const t = (s || '').trim(); if (!t) return ''; const d = new Date(t); return isNaN(+d) ? '' : d.toISOString().slice(0, 10); };
   for (const line of lines.slice(hasHeader ? 1 : 0)) {
@@ -150,10 +208,13 @@ export function importDriversCsv(text: string): { added: number; updated: number
       constraints: iCon >= 0 ? (c[iCon] ?? '') : '', readyDate: iReady >= 0 ? normDate(c[iReady]) : '',
       returnDate: iRet >= 0 ? normDate(c[iRet]) : '', pattern: iPat >= 0 ? (c[iPat] ?? '') : '',
     };
-    const ex = byName.get(name.toLowerCase());
-    if (ex) { Object.assign(ex, rec); updated++; }
-    else { const d = norm({ id: `drv-${Date.now()}-${added}`, ...rec }); list.push(d); byName.set(name.toLowerCase(), d); added++; }
+    const ex = nameMap.get(name.toLowerCase());
+    if (ex) { Object.assign(ex, rec); affected.push(ex); updated++; }
+    else { const d = norm({ id: `drv-${Date.now()}-${added}`, ...rec }); list.push(d); nameMap.set(name.toLowerCase(), d); affected.push(d); added++; }
   }
-  write(list.sort((a, b) => a.name.localeCompare(b.name)));
+  cache = list.sort(byName);
+  if (firebaseEnabled && db) { for (const d of affected) persistOne(d); }
+  else writeLocal();
+  emitChange();
   return { added, updated };
 }

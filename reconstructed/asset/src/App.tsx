@@ -17,6 +17,7 @@ import { loadFleet } from './data/fleetStore';
 import { ROUTES } from './data/fleet';
 import { canManageRoles } from './data/permStore';
 import { onChange } from './data/bus';
+import { watchForUpdate } from './data/versionCheck';
 
 /* Asset Matrix — the asset-side master dispatch. Standalone: it holds our own
    trucks, the USPS route data, scheduling, driver availability, and the route
@@ -24,7 +25,7 @@ import { onChange } from './data/bus';
    kept minimal, and driver / team / route look-ups are separate filters below
    the header (not one catch-all search box). */
 
-const APP_VERSION = '0.11.0';
+const APP_VERSION = '0.12.0';
 
 type Tab = 'matrix' | 'optimizer' | 'otp' | 'covered' | 'fleet' | 'fleet-map' | 'fleet-oos' | 'drivers' | 'roles'
   | 'fin-cpm' | 'fin-customer' | 'fin-truck' | 'fin-miles' | 'integrations';
@@ -112,9 +113,13 @@ export default function App() {
   const [seedDrivers, setSeedDrivers] = useState<{ q: string; nonce: number }>({ q: '', nonce: 0 });
   const [seedFleet, setSeedFleet] = useState<{ q: string; nonce: number }>({ q: '', nonce: 0 });
   const [, force] = useState(0);
+  const [updateReady, setUpdateReady] = useState(false);
 
   /* re-render on any store change so Roles-tab visibility + look-up data stay live */
   useEffect(() => onChange(() => force((n) => n + 1)), []);
+
+  /* watch for a newer deploy → prompt a one-tap refresh (no more stale versions) */
+  useEffect(() => watchForUpdate(() => setUpdateReady(true)), []);
 
   /* collapse the drawer when the window shrinks to mobile so it doesn't sit open over content */
   useEffect(() => {
@@ -167,6 +172,13 @@ export default function App() {
 
   return (
     <div className={`asset-shell ${sidebarOpen ? 'sb-open' : ''}`}>
+      {updateReady && (
+        <div className="asset-update-bar" role="alert">
+          <span>🔄 A newer version of Asset Matrix is available.</span>
+          <button className="asset-update-btn" onClick={() => window.location.reload()}>Refresh now</button>
+          <button className="asset-update-x" title="Dismiss" onClick={() => setUpdateReady(false)}>✕</button>
+        </div>
+      )}
       <header className="asset-topbar">
         <button className="asset-menu" onClick={() => setSidebarOpen((o) => !o)} title={sidebarOpen ? 'Hide menu' : 'Show menu'} aria-label="Toggle navigation">☰</button>
         <div className="asset-brand">
