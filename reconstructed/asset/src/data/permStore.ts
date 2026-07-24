@@ -66,11 +66,11 @@ export function roleOf(email: string): Role | '' {
 /* everyone who has signed in (owner excluded — shown separately, always owner),
    each with their assigned role or the FMT default. New sign-ins appear here
    automatically via the shared roster. */
-export interface RoleRow { email: string; role: Role; displayName: string; lastSeenAt?: number }
+export interface RoleRow { email: string; role: Role; assigned: boolean; displayName: string; lastSeenAt?: number }
 export function roleAssignments(): RoleRow[] {
   return rosterUsers()
     .filter((u) => !isOwnerEmail(u.email))
-    .map((u) => ({ email: u.email, role: u.role ?? DEFAULT_ROLE, displayName: u.displayName, lastSeenAt: u.lastSeenAt }));
+    .map((u) => ({ email: u.email, role: u.role ?? DEFAULT_ROLE, assigned: !!u.role, displayName: u.displayName, lastSeenAt: u.lastSeenAt }));
 }
 export function setRole(email: string, role: Role): void {
   const e = norm(email); if (!e || isOwnerEmail(e)) return; // never demote/assign the owner

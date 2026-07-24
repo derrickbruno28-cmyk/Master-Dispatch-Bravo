@@ -21,12 +21,28 @@ export default function RolesView() {
   const [newEmail, setNewEmail] = useState('');
   const [newRole, setNewRole] = useState<Role>('fmt');
   const [newMgr, setNewMgr] = useState('');
+  const [drafts, setDrafts] = useState<Record<string, Role>>({});   // pending per-row selections
+  const [savedMsg, setSavedMsg] = useState('');
 
   useEffect(() => onChange(() => { setList(roleAssignments()); setManagers(roleManagers()); force((n) => n + 1); }), []);
 
   function refresh() { setList(roleAssignments()); setManagers(roleManagers()); force((n) => n + 1); }
-  function assign(email: string, r: Role) { setRole(email, r); refresh(); }
-  function addNew() { const e = newEmail.trim(); if (!e) return; setRole(e, newRole); setNewEmail(''); refresh(); }
+  function flashSaved(msg: string) { setSavedMsg(msg); window.setTimeout(() => setSavedMsg(''), 3200); }
+  function pick(email: string, r: Role) { setDrafts((p) => ({ ...p, [email]: r })); }
+  function saveRow(email: string, committed: Role, name: string) {
+    const role = drafts[email] ?? committed;
+    setRole(email, role);
+    setDrafts((p) => { const n = { ...p }; delete n[email]; return n; });
+    flashSaved(`✓ Saved — ${name || email} is now ${ROLE_LABELS[role]}`);
+    refresh();
+  }
+  function resetRow(email: string) {
+    removeRole(email);
+    setDrafts((p) => { const n = { ...p }; delete n[email]; return n; });
+    flashSaved(`↺ Reset — ${email} back to ${ROLE_LABELS['fmt']} (edit-only)`);
+    refresh();
+  }
+  function addNew() { const e = newEmail.trim(); if (!e) return; setRole(e, newRole); setNewEmail(''); flashSaved(`✓ Saved — ${e} added as ${ROLE_LABELS[newRole]}`); refresh(); }
   function addMgr() { const e = newMgr.trim(); if (!e) return; addRoleManager(e); setNewMgr(''); refresh(); }
 
   const role = currentRole();
@@ -61,10 +77,11 @@ export default function RolesView() {
 
       {/* team roster — everyone who has signed in, auto-populated */}
       <div className="roles-section">
-        <div className="roles-section-h">Team <span className="am-muted">— everyone who has signed in. New sign-ins appear here automatically with FMT (edit-only); just pick their role.</span></div>
+        <div className="roles-section-h">Team <span className="am-muted">— everyone who has signed in. New sign-ins appear here automatically with FMT (edit-only); pick a role and click Save.</span></div>
+        {savedMsg && <div className="am-notice" style={{ color: 'var(--green)', borderColor: 'rgba(34,197,94,0.4)', background: 'rgba(34,197,94,0.08)' }}>{savedMsg}</div>}
         <div className="am-scroll roles-scroll">
           <table className="am-grid am-fleet">
-            <thead><tr><th>Person</th><th>Role</th><th>Last signed in</th><th></th></tr></thead>
+            <thead><tr><th>Person</th><th>Role</th><th>Last signed in</th><th>Save</th></tr></thead>
             <tbody>
               {OWNER_EMAILS.map((e) => (
                 <tr key={e}><td className="am-tractor">{e}</td><td><span className="am-pill" style={{ color: 'var(--accent)' }}>Owner</span></td><td className="am-muted" style={{ fontSize: 11 }}>—</td><td className="am-muted" style={{ fontSize: 11 }}>always owner</td></tr>
@@ -72,20 +89,30 @@ export default function RolesView() {
               {list.length === 0 && (
                 <tr><td colSpan={4} className="am-muted" style={{ textAlign: 'center', padding: 14 }}>No one else has signed in yet. As teammates sign in with their work Google account, they'll show up here — or pre-add someone below.</td></tr>
               )}
-              {list.map((u) => (
-                <tr key={u.email}>
-                  <td className="am-tractor">
-                    {u.displayName ? <><b>{u.displayName}</b><div className="am-muted" style={{ fontSize: 11 }}>{u.email}</div></> : u.email}
-                  </td>
-                  <td>
-                    <select className="am-input" style={{ maxWidth: 150 }} value={u.role} onChange={(e) => assign(u.email, e.target.value as Role)}>
-                      {ASSIGNABLE_ROLES.map((r) => <option key={r} value={r}>{ROLE_LABELS[r]}</option>)}
-                    </select>
-                  </td>
-                  <td className="am-muted" style={{ fontSize: 11 }}>{u.lastSeenAt ? new Date(u.lastSeenAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) : '—'}</td>
-                  <td className="fleet-actions"><button className="fleet-del" title="Reset to FMT (edit-only)" onClick={() => { removeRole(u.email); refresh(); }}>↺</button></td>
-                </tr>
-              ))}
+              {list.map((u) => {
+                const sel = drafts[u.email] ?? u.role;
+                const dirty = sel !== u.role;
+                const canSave = dirty || !u.assigned;   // allow the first assignment to be an explicit Save
+                return (
+                  <tr key={u.email} className={dirty ? 'roles-row-dirty' : ''}>
+                    <td className="am-tractor">
+                      {u.displayName ? <><b>{u.displayName}</b><div className="am-muted" style={{ fontSize: 11 }}>{u.email}</div></> : u.email}
+                    </td>
+                    <td>
+                      <select className="am-input" style={{ maxWidth: 150 }} value={sel} onChange={(e) => pick(u.email, e.target.value as Role)}>
+                        {ASSIGNABLE_ROLES.map((r) => <option key={r} value={r}>{ROLE_LABELS[r]}</option>)}
+                      </select>
+                    </td>
+                    <td className="am-muted" style={{ fontSize: 11 }}>{u.lastSeenAt ? new Date(u.lastSeenAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) : '—'}</td>
+                    <td className="fleet-actions">
+                      {canSave
+                        ? <button className="am-save" onClick={() => saveRow(u.email, u.role, u.displayName)}>{u.assigned ? 'Update' : 'Save'}</button>
+                        : <span className="roles-saved">✓ Saved</span>}
+                      <button className="fleet-del" title="Reset to FMT (edit-only)" onClick={() => resetRow(u.email)}>↺</button>
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
