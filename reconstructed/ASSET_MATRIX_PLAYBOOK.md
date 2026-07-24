@@ -62,7 +62,8 @@ Newest first. **Current live version is flagged.** Use the SHA to revert.
 
 | Version | Commit | Date | What it added |
 |--------|--------|------|----------------|
-| **v0.8.0 ← LIVE** | `1476a69` | 2026-07-24 | Samsara integration scaffold (adapter + Integrations page), HOS-gated next-route suggestions on the calendar, Samsara-style Fleet Map (satellite/terrain/weather/traffic/zoom), geofence import, Drivers→"Driver Availability" rename |
+| v0.9.0 *(staged on branch — not yet live)* | `12ae216` | 2026-07-24 | Fleet Map rebuilt on **MapLibre GL**: real vector basemap (OpenFreeMap, no key), native zoom/pan, truck markers that glide as GPS updates, weather/traffic/geofence layers, base-map switcher with Satellite/Hybrid/Terrain gated on a MapTiler key |
+| **v0.8.0 ← LIVE** | `1476a69` | 2026-07-24 | Samsara integration scaffold (adapter + Integrations page), HOS-gated next-route suggestions on the calendar, first Samsara-style Fleet Map (SVG), geofence import, Drivers→"Driver Availability" rename |
 | v0.7.0 | `7138e96` | 2026-07-24 | Navigation overhaul: collapsible left side-panel nav, minimal top bar, universal search replaced with separate Driver / Team / Route look-up filters |
 | v0.6.0 | `423ec8f` | 2026-07-23 | Loads Phase 3: first Fleet Map, Out-of-Service (Fleetio) board + matrix row-lock, rate-con PDF auto-fill |
 | v0.5.x | `254437f` | 2026-07-23 | Loads Phase 2: split / relay loads, Financials analytics (Revenue/CPM, by customer, by truck, driver miles) |
@@ -165,15 +166,17 @@ planned**. This is the map for deciding what to change.
   dispatched, shutdown), flyer/confirmation tracking, cross-city pickup flags.
 - **Now:** editable fleet cards; sets the team status that shows on the matrix.
 
-### Fleet Map  ⚠ redesign planned — see §7
+### Fleet Map  (rebuilt on MapLibre GL in v0.9.0)
 - **Purpose:** live GPS map of the whole fleet.
-- **Now:** a hand-drawn US map (SVG) with truck pins by status, satellite/terrain
-  toggle, national weather overlay, traffic congestion coloring, interstate
-  shields, zoom-dependent state/city labels, geofence import. **This is the piece
-  being upgraded** — see the redesign options in §7. Positions come from the
-  Samsara adapter (mock until backend).
-- **Planned:** real map engine, real zoom, and **trucks that move** as GPS
-  updates come through the Samsara API.
+- **Now (v0.9.0):** a **real MapLibre GL map** — real vector street basemap
+  (OpenFreeMap, no key), native scroll/pinch **zoom** + pan, and **truck markers
+  that glide** toward new GPS as positions poll through the Samsara adapter
+  (en-route trucks are simulated moving until the live backend is wired). Weather,
+  traffic (colored interstates + shields), and geofences are real toggleable
+  layers. Base-map switcher: Streets / Light (free) + **Satellite / Hybrid /
+  Terrain** which unlock when a MapTiler key is added on Integrations.
+- **Planned:** wire real Samsara GPS behind the adapter → the markers move on real
+  positions; add the MapTiler key → satellite imagery (the full Samsara look).
 
 ### Out of Service (Fleetio)
 - **Purpose:** maintenance board; flag a truck out of service.
@@ -217,9 +220,14 @@ encrypted deploy secrets — **never in chat, never hardcoded.**
 
 ---
 
-## 7. Fleet Map redesign — design options (pick one)
+## 7. Fleet Map redesign — design options
 
-The current map is a hand-drawn SVG. It works for a demo but looks plain and
+> **STATUS: Option A shipped in v0.9.0** (real MapLibre map, real zoom, moving
+> trucks — no key). **Option B is one free key away:** add a MapTiler key on the
+> Integrations page and Satellite / Hybrid / Terrain turn on. Option C remains a
+> later choice.
+
+The original map was a hand-drawn SVG. It works for a demo but looks plain and
 doesn't do real geography, real zoom, or moving trucks. To look like **Samsara**
 (which is built on Mapbox GL), we move to a **real map engine**. Here are the
 options, honest about the key/cost trade-offs:
@@ -275,5 +283,5 @@ today and the full Samsara look the moment you add one free key.
 
 ---
 
-*Last updated: 2026-07-24 · reflects v0.8.0 (`1476a69`). Ask me to update this
-doc whenever we ship a new version.*
+*Last updated: 2026-07-24 · live = v0.8.0 (`1476a69`); v0.9.0 (`12ae216`) staged
+on branch awaiting deploy. Ask me to update this doc whenever we ship a new version.*
