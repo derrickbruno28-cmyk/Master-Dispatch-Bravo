@@ -5,7 +5,7 @@
 import { TRUCKS as SEED, TERMINALS, TERMINAL_LABELS } from './fleet';
 import { emitChange } from './bus';
 import { db, firebaseEnabled } from '../firebase';
-import { collection, doc, onSnapshot, setDoc, deleteDoc } from 'firebase/firestore';
+import { collection, doc, onSnapshot, setDoc, deleteDoc, getDocs } from 'firebase/firestore';
 
 export interface FleetTruck {
   tractor: string; rating: string; driver1: string; driver2: string;
@@ -65,6 +65,14 @@ export function startFleetSync() {
 if (firebaseEnabled) startFleetSync();
 
 export function loadFleet(): FleetTruck[] { return cache; }
+
+/* one-shot re-pull from the shared fleet (in case the live subscription stalled) */
+export async function refreshFleetFromShared(): Promise<number> {
+  if (!firebaseEnabled || !db) return cache.length;
+  const snap = await getDocs(collection(db, COL));
+  if (!snap.empty) { cache = snap.docs.map((d) => normTruck({ ...(d.data() as Partial<FleetTruck>), tractor: d.id })); emitChange(); }
+  return cache.length;
+}
 
 export function saveTruck(t: FleetTruck) {
   const nt = normTruck(t);

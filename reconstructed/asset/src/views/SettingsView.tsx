@@ -5,6 +5,9 @@ import { maptilerKey, setMaptilerKey, maptilerMasked } from '../integrations/map
 import { onChange, emitChange } from '../data/bus';
 import { firebaseEnabled } from '../firebase';
 import { hasLocalData, localCounts, restoreLocalToShared } from '../data/recoverLocal';
+import { runDiagnostics, type Diag } from '../data/diagnostics';
+import { refreshDriversFromShared } from '../data/driversStore';
+import { refreshFleetFromShared } from '../data/fleetStore';
 
 /* Integrations — the connection panel for external telematics. Samsara is the
    big one: paste an API key here (kept in this browser only, never in code), and
@@ -44,6 +47,19 @@ export default function SettingsView() {
   const [restoring, setRestoring] = useState(false);
   const [restoreMsg, setRestoreMsg] = useState('');
   const counts = localCounts();
+
+  const [diag, setDiag] = useState<Diag | null>(null);
+  const [diagBusy, setDiagBusy] = useState(false);
+  const [reloadMsg, setReloadMsg] = useState('');
+  async function checkSync() { setDiagBusy(true); setDiag(await runDiagnostics()); setDiagBusy(false); }
+  useEffect(() => { if (firebaseEnabled) void checkSync(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, []);
+  async function reloadShared() {
+    setReloadMsg('');
+    const d = await refreshDriversFromShared();
+    const f = await refreshFleetFromShared();
+    setReloadMsg(`↻ Pulled ${d} drivers and ${f} trucks from the shared database into this screen.`);
+    void checkSync();
+  }
   async function doRestore() {
     setRestoring(true); setRestoreMsg('');
     const res = await restoreLocalToShared();
@@ -74,6 +90,41 @@ export default function SettingsView() {
             <button className="am-save" disabled={restoring} onClick={doRestore}>{restoring ? 'Restoring…' : '🛟 Restore to shared roster'}</button>
           </div>
           {restoreMsg && <div className="am-notice" style={{ color: 'var(--green)', marginTop: 8 }}>{restoreMsg}</div>}
+        </div>
+      )}
+
+      {/* sync diagnostics — what's actually in the shared database right now */}
+      {firebaseEnabled && (
+        <div className="intg-card">
+          <div className="intg-card-head">
+            <div className="intg-card-title">🔎 Sync status <span className="intg-card-sub">{diag?.email || 'checking…'}</span></div>
+            <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
+              <button className="am-clear" type="button" disabled={diagBusy} onClick={checkSync}>{diagBusy ? 'Checking…' : '↻ Check'}</button>
+              <button className="am-save" type="button" onClick={reloadShared}>⤓ Reload data from shared</button>
+            </div>
+          </div>
+          <p className="am-muted" style={{ fontSize: 12.5, maxWidth: 720 }}>
+            Live document counts read straight from the shared team database. If a number here is higher than what your screen shows,
+            tap <b>Reload data from shared</b>. If a row shows a red error, that's a database-permission problem — send me the exact text.
+          </p>
+          <div className="am-scroll">
+            <table className="am-grid am-fleet">
+              <thead><tr><th>Shared data</th><th>In database</th><th>Status</th></tr></thead>
+              <tbody>
+                {!diag && <tr><td colSpan={3} className="am-muted" style={{ textAlign: 'center', padding: 12 }}>Checking the shared database…</td></tr>}
+                {diag?.cols.map((c) => (
+                  <tr key={c.name}>
+                    <td className="am-tractor">{c.label} <span className="am-muted" style={{ fontSize: 11 }}>({c.name})</span></td>
+                    <td><b>{c.error ? '—' : c.count}</b></td>
+                    <td>{c.error
+                      ? <span style={{ color: 'var(--red)', fontSize: 11.5, fontWeight: 700 }}>⚠ {c.error}</span>
+                      : <span style={{ color: 'var(--green)', fontSize: 11.5, fontWeight: 700 }}>✓ readable</span>}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          {reloadMsg && <div className="am-notice" style={{ color: 'var(--green)', marginTop: 8 }}>{reloadMsg}</div>}
         </div>
       )}
 

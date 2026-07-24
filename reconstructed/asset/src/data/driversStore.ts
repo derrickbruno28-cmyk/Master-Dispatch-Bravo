@@ -10,7 +10,7 @@
    as the user roster (usersStore). */
 
 import { db, firebaseEnabled } from '../firebase';
-import { collection, doc, onSnapshot, setDoc, deleteDoc } from 'firebase/firestore';
+import { collection, doc, onSnapshot, setDoc, deleteDoc, getDocs } from 'firebase/firestore';
 import { loadFleet } from './fleetStore';
 import { loadAssignments, parseCellKey } from './schedule';
 import { emitChange } from './bus';
@@ -106,6 +106,14 @@ export function startDriversSync() {
 if (firebaseEnabled) startDriversSync();
 
 function read(): Driver[] { return cache; }
+
+/* one-shot re-pull from the shared roster (in case the live subscription stalled) */
+export async function refreshDriversFromShared(): Promise<number> {
+  if (!firebaseEnabled || !db) return cache.length;
+  const snap = await getDocs(collection(db, COL));
+  if (!snap.empty) { cache = snap.docs.map((d) => norm({ ...(d.data() as Partial<Driver>), id: d.id })).sort(byName); emitChange(); }
+  return cache.length;
+}
 
 /* persist one driver — a single Firestore doc when live, whole list in demo */
 function persistOne(d: Driver) {
