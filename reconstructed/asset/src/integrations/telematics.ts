@@ -99,7 +99,9 @@ class MockFleetio implements FleetioClient {
    Fleetio token — it calls this same-project HTTPS function with the signed-in
    user's Firebase ID token; the function verifies the account server-side, reads
    the Fleetio secrets, and returns a sanitized vehicle list. */
-export interface ProxyUnit { truck: string; odometer: number; make: string; fleetioStatus: string }
+/* the connector returns make + service only — odometers are never read from
+   Fleetio (kept as set manually / from the export). */
+export interface ProxyUnit { truck: string; make: string; fleetioStatus: string }
 export function fleetioProxyUrl(): string { return `https://us-central1-${firebaseProjectId}.cloudfunctions.net/fleetioVehicles`; }
 
 async function fetchProxyUnits(): Promise<ProxyUnit[]> {
@@ -127,9 +129,10 @@ class ProxyFleetio implements FleetioClient {
   readonly label = 'Fleetio: live (read-only connector)';
   private map(units: ProxyUnit[]): FleetioUnit[] {
     const oos = new Set(localOosList());
+    const odoByTruck = new Map(loadFleet().map((t) => [t.tractor, t.odometer ?? 0]));
     return units.filter((u) => u.truck).map((u) => ({
       truck: u.truck,
-      odometer: Number.isFinite(u.odometer) ? u.odometer : 0,
+      odometer: odoByTruck.get(u.truck) ?? 0,   // keep the existing odometer — never read from Fleetio
       make: u.make || '',
       status: (oos.has(u.truck) || u.fleetioStatus === 'Out of Service' || u.fleetioStatus === 'In Shop')
         ? 'out_of_service' as const : 'in_service' as const,

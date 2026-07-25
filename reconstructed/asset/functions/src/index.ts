@@ -5,9 +5,11 @@
      2. reads the Fleetio API + Account tokens from Secret Manager (never in the
         client bundle, never in the repo),
      3. pulls every vehicle from Fleetio and returns a sanitized list
-        (truck #, odometer, make, service status) as JSON.
-   The browser app calls this instead of Fleetio directly — Fleetio's API can't
-   be called safely from a browser (token exposure + no CORS). */
+        (truck #, make, service status) as JSON.
+   Odometers are deliberately NOT read from Fleetio — they stay as set manually /
+   from the one-time export. The browser app calls this instead of Fleetio
+   directly — Fleetio's API can't be called safely from a browser (token
+   exposure + no CORS). */
 
 import { onRequest } from 'firebase-functions/v2/https';
 import { defineSecret } from 'firebase-functions/params';
@@ -30,7 +32,7 @@ function normStatus(s: string): FleetioState {
   return 'Other';
 }
 
-interface SanitizedUnit { truck: string; odometer: number; make: string; fleetioStatus: FleetioState }
+interface SanitizedUnit { truck: string; make: string; fleetioStatus: FleetioState }
 
 export const fleetioVehicles = onRequest(
   {
@@ -84,10 +86,9 @@ export const fleetioVehicles = onRequest(
         for (const v of rows) {
           const truck = String(v.name ?? '').trim();
           if (!truck) continue;
-          const odo = Number(v.current_meter_value ?? 0);
+          // odometer (current_meter_value) is intentionally NOT read from Fleetio
           units.push({
             truck,
-            odometer: Number.isFinite(odo) ? Math.round(odo) : 0,
             make: String(v.make ?? '').trim(),
             fleetioStatus: normStatus(String(v.vehicle_status_name ?? '')),
           });

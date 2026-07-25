@@ -213,7 +213,7 @@ export default function SettingsView() {
         <div className="intg-live-row">
           <label className="samsara-geo-pick" style={{ fontSize: 13 }}>
             <input type="checkbox" checked={fltLive} onChange={(e) => toggleFltLive(e.target.checked)} />
-            <b>Live Fleetio sync</b> — read odometers &amp; status from Fleetio hourly (through the connector)
+            <b>Live Fleetio sync</b> — read <b>make &amp; in/out-of-service</b> from Fleetio (through the connector). <b>Odometers are not pulled</b> — they stay as you set them.
           </label>
           <button type="button" className="am-clear" disabled={fltTest.busy} onClick={testFlt}>{fltTest.busy ? 'Testing…' : '🔌 Test connection'}</button>
         </div>
