@@ -286,7 +286,14 @@
 .opt-add-btn:disabled { opacity: 0.4; cursor: not-allowed; }
 .opt-add-ok { color: var(--green); }
 .fleet-shutdown td { background: rgba(245,80,90,0.08); }
+.fleet-shutdown td:first-child { box-shadow: inset 3px 0 0 var(--red); }
 .fleet-shutdown .am-tractor { color: var(--red); }
+.oos-tag { display: inline-block; margin-left: 6px; font-size: 9.5px; font-weight: 800; letter-spacing: 0.4px; color: #fff; background: var(--red); border-radius: 4px; padding: 1px 5px; vertical-align: middle; }
+.fleet-svcfilter { display: inline-flex; gap: 6px; }
+.fleet-svcfilter button { border: 1px solid var(--border); background: var(--panel); color: var(--muted); border-radius: 999px; padding: 3px 11px; font: inherit; font-size: 11px; font-weight: 700; cursor: pointer; white-space: nowrap; }
+.fleet-svcfilter button:hover { color: var(--text); }
+.fleet-svcfilter button.on { background: var(--panel-2); color: var(--text); border-color: var(--accent); }
+.fleet-svcfilter button.oos.on { border-color: var(--red); color: var(--red); }
 .row-shutdown .am-truckcol { background: rgba(245,80,90,0.1) !important; }
 .am-truck-shutdown .am-tractor, .row-shutdown .am-tractor { color: var(--red); }
 .am-shutdown-tag { margin-left: 6px; font-size: 8.5px; font-weight: 800; color: #fff; background: var(--red); border-radius: 3px; padding: 1px 5px; letter-spacing: 0.3px; }

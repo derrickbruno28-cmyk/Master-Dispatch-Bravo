@@ -20,6 +20,7 @@ export default function TrucksView() {
   const [confirmDel, setConfirmDel] = useState<string | null>(null);
   const [canDel, setCanDel] = useState<boolean>(() => canDelete());
   const [svc, setSvc] = useState<Record<string, ServiceStatus>>({});
+  const [svcFilter, setSvcFilter] = useState<'all' | 'in' | 'oos'>('all');
   const [importing, setImporting] = useState(false);
   const [notice, setNotice] = useState('');
   const fio = fleetioClient();
@@ -40,23 +41,31 @@ export default function TrucksView() {
     setImporting(true);
     const r = await importFromFleetio();
     setImporting(false);
-    setNotice(`✓ Fleetio import — ${r.created} new profile${r.created === 1 ? '' : 's'} created, ${r.updated} updated (odometer + make) from ${r.total} units. Rate them manually in each profile.`);
+    setNotice(`✓ Fleetio import — ${r.created} new profile${r.created === 1 ? '' : 's'} created, ${r.updated} updated from ${r.total} units.`);
     window.setTimeout(() => setNotice(''), 5000);
   }
 
+  const isOos = (t: FleetTruck) => svc[t.tractor] === 'out_of_service';
   const rows = useMemo(() => {
     const n = q.trim().toLowerCase();
     return fleet
-      .filter((t) => !n || `${t.tractor} ${t.type} ${t.unitRating} ${t.homeCity} ${t.currentCity} ${t.driver1} ${t.driver2}`.toLowerCase().includes(n))
+      .filter((t) => !n || `${t.tractor} ${t.type} ${t.make} ${t.homeCity} ${t.currentCity} ${t.driver1} ${t.driver2}`.toLowerCase().includes(n))
+      .filter((t) => svcFilter === 'all' || (svcFilter === 'oos' ? isOos(t) : !isOos(t)))
       .slice().sort((a, b) => a.tractor.localeCompare(b.tractor, undefined, { numeric: true }));
-  }, [fleet, q]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fleet, q, svc, svcFilter]);
 
   return (
     <div className="am-page">
       <div className="am-head">
         <h2>Trucks</h2>
-        <input className="am-input" style={{ maxWidth: 200 }} placeholder="Search truck / rating / city…" value={q} onChange={(e) => setQ(e.target.value)} />
-        <span className="am-muted">{rows.length} of {fleet.length} trucks · {oosCount} out of service</span>
+        <input className="am-input" style={{ maxWidth: 200 }} placeholder="Search truck / make / city…" value={q} onChange={(e) => setQ(e.target.value)} />
+        <div className="fleet-svcfilter">
+          <button className={svcFilter === 'all' ? 'on' : ''} onClick={() => setSvcFilter('all')}>All {fleet.length}</button>
+          <button className={svcFilter === 'in' ? 'on' : ''} onClick={() => setSvcFilter('in')}>● In service {fleet.length - oosCount}</button>
+          <button className={`oos ${svcFilter === 'oos' ? 'on' : ''}`} onClick={() => setSvcFilter('oos')}>⛔ Out of service {oosCount}</button>
+        </div>
+        <span className="am-muted">{rows.length} shown</span>
         <span className="fleet-io-badge" title="Fleetio is read-only — Asset Matrix never writes to Fleetio">🔗 {fio.label}</span>
         <button className="am-clear" disabled={importing} title="Create a profile for every Fleetio unit + pull odometer &amp; make (read-only). Units import unrated — rate them manually." onClick={runImport}>⤓ {importing ? 'Importing…' : 'Import from Fleetio'}</button>
         <button className="am-save fleet-add" onClick={() => { setEditing(blankTruck()); setIsNew(true); }}>＋ Add Truck</button>
@@ -75,7 +84,7 @@ export default function TrucksView() {
               const oos = svc[t.tractor] === 'out_of_service';
               return (
               <tr key={t.tractor} className={oos ? 'fleet-shutdown' : ''}>
-                <td className="am-tractor">#{t.tractor}</td>
+                <td className="am-tractor">#{t.tractor}{oos && <span className="oos-tag" title="Out of service (Fleetio / marked here) — blocked from the Asset Matrix">OOS</span>}</td>
                 <td className="am-muted">{t.make ? MAKE_LABEL[normMake(t.make)] : '—'}</td>
                 <td>
                   <div className="svc-cell">
