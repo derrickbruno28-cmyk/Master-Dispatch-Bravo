@@ -40,7 +40,7 @@ export default function TrucksView() {
     setImporting(true);
     const r = await importFromFleetio();
     setImporting(false);
-    setNotice(`✓ Fleetio import — ${r.created} new profile${r.created === 1 ? '' : 's'} created, ${r.updated} updated (odometer + rating) from ${r.total} units.`);
+    setNotice(`✓ Fleetio import — ${r.created} new profile${r.created === 1 ? '' : 's'} created, ${r.updated} updated (odometer + make) from ${r.total} units. Rate them manually in each profile.`);
     window.setTimeout(() => setNotice(''), 5000);
   }
 
@@ -58,12 +58,12 @@ export default function TrucksView() {
         <input className="am-input" style={{ maxWidth: 200 }} placeholder="Search truck / rating / city…" value={q} onChange={(e) => setQ(e.target.value)} />
         <span className="am-muted">{rows.length} of {fleet.length} trucks · {oosCount} out of service</span>
         <span className="fleet-io-badge" title="Fleetio is read-only — Asset Matrix never writes to Fleetio">🔗 {fio.label}</span>
-        <button className="am-clear" disabled={importing} title="Create a profile for every Fleetio unit + pull odometer, make &amp; rating (read-only)" onClick={runImport}>⤓ {importing ? 'Importing…' : 'Import from Fleetio'}</button>
+        <button className="am-clear" disabled={importing} title="Create a profile for every Fleetio unit + pull odometer &amp; make (read-only). Units import unrated — rate them manually." onClick={runImport}>⤓ {importing ? 'Importing…' : 'Import from Fleetio'}</button>
         <button className="am-save fleet-add" onClick={() => { setEditing(blankTruck()); setIsNew(true); }}>＋ Add Truck</button>
       </div>
       {notice && <div className="am-notice">{notice}</div>}
       <div className="am-muted" style={{ fontSize: 11.5, margin: '2px 0 10px' }}>
-        Unit rating A→D per the <b>Truck Rating SOP</b> — make-specific mileage bands (750K = hard D). Odometer, make &amp; service refresh from Fleetio hourly. <b>Out-of-service units can't be assigned</b> on the Asset Matrix (in / out of service is managed right here).
+Units import from Fleetio <b>unrated</b> — set each A→D unit rating <b>manually</b> per the Truck Rating SOP (make-specific bands; 750K = hard D). Odometer, make &amp; service refresh from Fleetio hourly (ratings are never auto-changed). <b>Out-of-service / in-shop units can't be assigned</b> on the Asset Matrix (in / out of service is managed right here).
       </div>
 
       <div className="am-scroll">

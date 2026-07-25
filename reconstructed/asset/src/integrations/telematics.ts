@@ -6,6 +6,7 @@
 
 import { integrationConfig, samsaraConfigured, fleetioConfigured } from './config';
 import { CITY_COORDS } from '../data/fleet';
+import { FLEETIO_UNITS, fleetioInService } from '../data/fleetUnits';
 import { loadFleet } from '../data/fleetStore';
 
 export interface TruckPosition {
@@ -60,29 +61,35 @@ export function setLocalOos(truck: string, oos: boolean) {
   try { localStorage.setItem(OOS_KEY, JSON.stringify([...list])); } catch { /* ignore */ }
 }
 
-/* deterministic mock odometer + make per truck # so the demo is stable and spans
-   all four rating tiers (real values come from Fleetio once a token is set). */
-function mockHash(tractor: string): number { let h = 0; for (const ch of tractor) h = (h * 31 + ch.charCodeAt(0)) >>> 0; return h; }
-function mockOdometer(tractor: string): number { return 60_000 + (mockHash(tractor) % 780) * 1000; } // ~60k–840k
-function mockMake(tractor: string): string { return ['International', 'Volvo', 'Peterbilt', 'Freightliner'][mockHash(tractor) % 4]; }
+/* the Fleetio vehicle export (data/fleetUnits) is the source of truth for the
+   mock: real odometer, make, and service status per truck. A truck flagged
+   Out of Service or In Shop in Fleetio is out_of_service here (blocks matrix
+   assignment); dispatch can still mark any truck OOS locally on top of that. */
+const FLEETIO_BY_TRUCK = new Map(FLEETIO_UNITS.map((u) => [u.tractor, u]));
 
 class MockFleetio implements FleetioClient {
   readonly connected = true;
   readonly label = fleetioConfigured() ? 'Fleetio: token set (impl pending)' : 'Fleetio: connected (mock)';
   async serviceStatuses(): Promise<VehicleService[]> {
     const oos = new Set(localOosList());
-    return loadFleet().map((t) => ({
-      truck: t.tractor,
-      status: oos.has(t.tractor) ? 'out_of_service' as const : 'in_service' as const,
-      reason: oos.has(t.tractor) ? 'Marked out of service' : undefined,
-      since: undefined, source: 'mock' as const,
-    }));
+    return loadFleet().map((t) => {
+      const u = FLEETIO_BY_TRUCK.get(t.tractor);
+      const fleetioOos = u ? !fleetioInService(u.status) : false;
+      const out = oos.has(t.tractor) || fleetioOos;
+      return {
+        truck: t.tractor,
+        status: out ? 'out_of_service' as const : 'in_service' as const,
+        reason: oos.has(t.tractor) ? 'Marked out of service' : (fleetioOos ? u!.status : undefined),
+        since: undefined, source: 'mock' as const,
+      };
+    });
   }
   async units(): Promise<FleetioUnit[]> {
     const oos = new Set(localOosList());
-    return loadFleet().map((t) => ({
-      truck: t.tractor, odometer: mockOdometer(t.tractor), make: mockMake(t.tractor),
-      status: oos.has(t.tractor) ? 'out_of_service' as const : 'in_service' as const, source: 'mock' as const,
+    return FLEETIO_UNITS.map((u) => ({
+      truck: u.tractor, odometer: u.odometer, make: u.make,
+      status: (oos.has(u.tractor) || !fleetioInService(u.status)) ? 'out_of_service' as const : 'in_service' as const,
+      source: 'mock' as const,
     }));
   }
 }

@@ -24,7 +24,7 @@ export interface FleetTruck {
 
 export { TERMINALS, TERMINAL_LABELS };
 
-const KEY = 'asset-fleet-v2';   // v2 = Houston terminal removed (#444 → SATX) + flyer/confirm fields
+const KEY = 'asset-fleet-v3';   // v3 = roster reseeded from the Fleetio vehicle export (real GH/AJG units, unrated)
 const COL = 'assetFleet';       // shared Firestore collection (one doc per tractor)
 
 function normTruck(t: Partial<FleetTruck>): FleetTruck {

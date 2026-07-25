@@ -7,10 +7,12 @@
 
 import { loadFleet, saveTruck, blankTruck, type FleetTruck } from './fleetStore';
 import { fleetioClient } from '../integrations/telematics';
-import { rateByOdometer } from './truckRating';
 
 export interface ImportResult { created: number; updated: number; total: number }
 
+/* Create a profile for every Fleetio unit + refresh odometer / make. Units are
+   imported UNRATED — the A/B/C/D unit rating is set MANUALLY for now, so we never
+   stamp (or overwrite) unitRating here. */
 export async function importFromFleetio(): Promise<ImportResult> {
   const units = await fleetioClient().units();
   const byTractor = new Map(loadFleet().map((t) => [t.tractor, t]));
@@ -19,12 +21,11 @@ export async function importFromFleetio(): Promise<ImportResult> {
   for (const u of units) {
     if (!u.truck) continue;
     const existing = byTractor.get(u.truck);
-    const rating = rateByOdometer(u.odometer, u.make);
     if (existing) {
-      saveTruck({ ...existing, odometer: u.odometer, odoAt: now, make: u.make || existing.make, unitRating: rating });
+      saveTruck({ ...existing, odometer: u.odometer, odoAt: now, make: u.make || existing.make });
       updated++;
     } else {
-      const t: FleetTruck = { ...blankTruck(), tractor: u.truck, odometer: u.odometer, odoAt: now, make: u.make, unitRating: rating };
+      const t: FleetTruck = { ...blankTruck(), tractor: u.truck, odometer: u.odometer, odoAt: now, make: u.make, unitRating: '' };
       saveTruck(t);
       created++;
     }
@@ -33,7 +34,8 @@ export async function importFromFleetio(): Promise<ImportResult> {
 }
 
 /* hourly odometer refresh — updates existing profiles only (no creation), and
-   only writes when the reading actually changed (no churn). */
+   only writes when the reading actually changed (no churn). Ratings are NOT
+   recomputed here — they're set manually, so an hourly sync never touches them. */
 export async function syncOdometersOnce(): Promise<number> {
   const units = await fleetioClient().units();
   const byTruck = new Map(units.map((u) => [u.truck, u]));
@@ -43,9 +45,8 @@ export async function syncOdometersOnce(): Promise<number> {
     const u = byTruck.get(t.tractor);
     if (!u) continue;
     const make = u.make || t.make || '';
-    const rating = rateByOdometer(u.odometer, make);
-    if (u.odometer === t.odometer && make === (t.make || '') && rating === (t.unitRating || '')) continue; // no change
-    saveTruck({ ...t, odometer: u.odometer, odoAt: now, make, unitRating: rating });
+    if (u.odometer === t.odometer && make === (t.make || '')) continue; // no change
+    saveTruck({ ...t, odometer: u.odometer, odoAt: now, make });
     n++;
   }
   return n;
