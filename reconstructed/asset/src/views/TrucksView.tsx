@@ -5,7 +5,7 @@ import { onChange } from '../data/bus';
 import { fleetioClient, localOosList, setLocalOos, type ServiceStatus } from '../integrations/telematics';
 import { emitChange } from '../data/bus';
 import { importFromFleetio } from '../data/fleetioSync';
-import { RATING_COLORS, LANE_ELIGIBILITY, MAKE_LABEL, normMake, fmtOdometer } from '../data/truckRating';
+import { MAKE_LABEL, normMake } from '../data/truckRating';
 
 /* Trucks — the tractor roster (equipment-centric) + Fleetio unit data. Each unit
    carries an A/B/C/D rating by odometer, its live odometer (read from Fleetio
@@ -63,26 +63,19 @@ export default function TrucksView() {
       </div>
       {notice && <div className="am-notice">{notice}</div>}
       <div className="am-muted" style={{ fontSize: 11.5, margin: '2px 0 10px' }}>
-Units import from Fleetio <b>unrated</b> — set each A→D unit rating <b>manually</b> per the Truck Rating SOP (make-specific bands; 750K = hard D). Odometer, make &amp; service refresh from Fleetio hourly (ratings are never auto-changed). <b>Out-of-service / in-shop units can't be assigned</b> on the Asset Matrix (in / out of service is managed right here).
+        Your fleet, imported from Fleetio. Make &amp; service refresh from Fleetio. <b>Out-of-service / in-shop units can't be assigned</b> on the Asset Matrix (in / out of service is managed right here).
       </div>
 
       <div className="am-scroll">
         <table className="am-grid am-fleet">
-          <thead><tr><th>Truck #</th><th>Rating · lane eligibility</th><th>Odometer</th><th>Make</th><th>Service</th><th>Type</th><th>Home</th><th>Drivers (team)</th><th></th></tr></thead>
+          <thead><tr><th>Truck #</th><th>Make</th><th>Service</th><th>Type</th><th>Home</th><th>Drivers (team)</th><th></th></tr></thead>
           <tbody>
-            {rows.length === 0 && <tr><td colSpan={9} className="am-muted" style={{ textAlign: 'center', padding: 16 }}>No trucks.</td></tr>}
+            {rows.length === 0 && <tr><td colSpan={7} className="am-muted" style={{ textAlign: 'center', padding: 16 }}>No trucks.</td></tr>}
             {rows.map((t) => {
               const oos = svc[t.tractor] === 'out_of_service';
               return (
               <tr key={t.tractor} className={oos ? 'fleet-shutdown' : ''}>
                 <td className="am-tractor">#{t.tractor}</td>
-                <td>{t.unitRating
-                  ? <div className="rating-cell">
-                      <span className="unit-rating" style={{ background: RATING_COLORS[t.unitRating] ?? 'var(--muted)' }} title={LANE_ELIGIBILITY[t.unitRating]}>{t.unitRating}</span>
-                      <span className="rating-elig">{LANE_ELIGIBILITY[t.unitRating]}</span>
-                    </div>
-                  : <span className="am-muted">— <span style={{ fontSize: 10 }}>import from Fleetio</span></span>}</td>
-                <td className="am-muted" style={{ fontVariantNumeric: 'tabular-nums' }}>{fmtOdometer(t.odometer)}</td>
                 <td className="am-muted">{t.make ? MAKE_LABEL[normMake(t.make)] : '—'}</td>
                 <td>
                   <div className="svc-cell">

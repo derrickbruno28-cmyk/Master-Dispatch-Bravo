@@ -151,19 +151,21 @@ export default function AssetMatrixView() {
     return ps.includes(posFilter);
   }
 
-  /* the calendar shows CREWS only — a truck is on the board once it has at least
-     one driver assigned (via ＋ Add Team or the Team Status editor). Freshly
-     imported units sit in the Trucks list, unassigned, until you build a crew,
-     so the board stays clean instead of listing every tractor. */
+  /* the calendar shows CREWS + DOWN trucks — a truck is on the board once it has
+     at least one driver (via ＋ Add Team or the Team Status editor) OR it's out of
+     service (so dispatch can see the down equipment, assignment-locked). Freshly
+     imported IN-SERVICE units with no crew stay in the Trucks list until you build
+     a crew, so the board stays clean instead of listing every tractor. */
   const hasCrew = (t: FleetTruck) => !!(t.driver1 || '').trim() || !!(t.driver2 || '').trim();
+  const onBoard = (t: FleetTruck) => hasCrew(t) || oos.has(t.tractor);
   const byTerminal = useMemo(() => {
     const m: Record<string, FleetTruck[]> = {};
     for (const term of TERMINALS) m[term] = [];
-    for (const t of fleet) { if (!hasCrew(t) || !matchesPos(t)) continue; (m[t.homeCity] ?? (m[t.homeCity] = [])).push(t); }
+    for (const t of fleet) { if (!onBoard(t) || !matchesPos(t)) continue; (m[t.homeCity] ?? (m[t.homeCity] = [])).push(t); }
     return m;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [fleet, posFilter, driverPos]);
-  const crewCount = useMemo(() => fleet.filter(hasCrew).length, [fleet]);
+  }, [fleet, posFilter, driverPos, oos]);
+  const crewCount = useMemo(() => fleet.filter(onBoard).length, [fleet, oos]);
 
   const weekLabel = `${weekStart.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} – ${addDays(weekStart, 6).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}`;
 
