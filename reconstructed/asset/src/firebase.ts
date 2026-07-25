@@ -45,6 +45,7 @@ const cfg = {
 };
 
 export const firebaseEnabled = !!cfg.apiKey && !!cfg.projectId;
+export const firebaseProjectId = cfg.projectId;
 
 let app: FirebaseApp | null = null;
 let auth: Auth | null = null;
@@ -117,6 +118,13 @@ export async function signInWithGoogle(): Promise<User> {
 
 export async function signOut(): Promise<void> {
   if (auth) await fbSignOut(auth);
+}
+
+/* the signed-in user's Firebase ID token — sent to the read-only Fleetio
+   connector so the server can confirm it's a real company account. Null when
+   nobody is signed in (e.g. demo mode). */
+export async function currentIdToken(): Promise<string | null> {
+  try { return auth?.currentUser ? await auth.currentUser.getIdToken() : null; } catch { return null; }
 }
 
 /** Loadboard sign-in: any Google account is allowed — access is logged, and

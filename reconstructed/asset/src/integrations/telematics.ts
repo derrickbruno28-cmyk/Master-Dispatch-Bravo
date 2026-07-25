@@ -4,10 +4,11 @@
    lock can be built and demoed with zero keys. Real impls read tokens from
    env via integrations/config.ts. */
 
-import { integrationConfig, samsaraConfigured, fleetioConfigured } from './config';
+import { integrationConfig, samsaraConfigured, fleetioConfigured, fleetioLiveEnabled } from './config';
 import { CITY_COORDS } from '../data/fleet';
 import { FLEETIO_UNITS, fleetioInService } from '../data/fleetUnits';
 import { loadFleet } from '../data/fleetStore';
+import { firebaseEnabled, firebaseProjectId, currentIdToken } from '../firebase';
 
 export interface TruckPosition {
   truck: string; lat: number; lng: number;
@@ -94,48 +95,60 @@ class MockFleetio implements FleetioClient {
   }
 }
 
-/* Real Fleetio — READ ONLY (no writes are ever sent to Fleetio). Reads
-   GET /api/v1/vehicles when a token + account are configured; on any failure it
-   falls back to the mock so the app never breaks. NOTE for go-live: Fleetio's
-   API may not send CORS headers for direct browser calls — if so, route this
-   through a small read-only proxy / Cloud Function (same pattern as routing). */
-class LiveFleetio implements FleetioClient {
+/* the read-only Fleetio connector (Cloud Function). The browser never holds the
+   Fleetio token — it calls this same-project HTTPS function with the signed-in
+   user's Firebase ID token; the function verifies the account server-side, reads
+   the Fleetio secrets, and returns a sanitized vehicle list. */
+export interface ProxyUnit { truck: string; odometer: number; make: string; fleetioStatus: string }
+export function fleetioProxyUrl(): string { return `https://us-central1-${firebaseProjectId}.cloudfunctions.net/fleetioVehicles`; }
+
+async function fetchProxyUnits(): Promise<ProxyUnit[]> {
+  const idt = await currentIdToken();
+  if (!idt) throw new Error('Sign-in required for live Fleetio sync.');
+  const res = await fetch(fleetioProxyUrl(), { headers: { Authorization: `Bearer ${idt}` } });
+  if (!res.ok) {
+    let msg = `connector ${res.status}`;
+    try { const b = await res.json(); if (b?.error) msg = b.error; } catch { /* ignore */ }
+    throw new Error(msg);
+  }
+  const body = await res.json();
+  return (body.units ?? []) as ProxyUnit[];
+}
+
+/* one-off connectivity check for the Integrations page — returns a count or the
+   server's error message, without changing what the app is using. */
+export async function testFleetioProxy(): Promise<{ ok: boolean; count?: number; error?: string }> {
+  try { const units = await fetchProxyUnits(); return { ok: true, count: units.length }; }
+  catch (e) { return { ok: false, error: (e as Error).message }; }
+}
+
+class ProxyFleetio implements FleetioClient {
   readonly connected = true;
-  readonly label = 'Fleetio: connected (live, read-only)';
-  private async fetchVehicles(): Promise<Record<string, unknown>[]> {
-    const res = await fetch('https://secure.fleetio.com/api/v1/vehicles?per_page=100', {
-      headers: {
-        Authorization: `Token ${integrationConfig.fleetioToken}`,
-        'Account-Token': integrationConfig.fleetioAccount,
-        'Content-Type': 'application/json',
-      },
-    });
-    if (!res.ok) throw new Error(`Fleetio ${res.status}`);
-    const body = await res.json();
-    return Array.isArray(body) ? body : (body.records ?? []);
+  readonly label = 'Fleetio: live (read-only connector)';
+  private map(units: ProxyUnit[]): FleetioUnit[] {
+    const oos = new Set(localOosList());
+    return units.filter((u) => u.truck).map((u) => ({
+      truck: u.truck,
+      odometer: Number.isFinite(u.odometer) ? u.odometer : 0,
+      make: u.make || '',
+      status: (oos.has(u.truck) || u.fleetioStatus === 'Out of Service' || u.fleetioStatus === 'In Shop')
+        ? 'out_of_service' as const : 'in_service' as const,
+      source: 'fleetio' as const,
+    }));
+  }
+  async units(): Promise<FleetioUnit[]> {
+    try { return this.map(await fetchProxyUnits()); }
+    catch (e) { console.warn('Fleetio connector unavailable — using the Fleetio export', (e as Error).message); return mockFleetio.units(); }
   }
   async serviceStatuses(): Promise<VehicleService[]> {
     return (await this.units()).map((u) => ({ truck: u.truck, status: u.status, source: 'fleetio' as const }));
   }
-  async units(): Promise<FleetioUnit[]> {
-    try {
-      const rows = await this.fetchVehicles();
-      return rows.map((v) => {
-        const name = String((v as { name?: unknown }).name ?? '').trim();
-        const odo = Number((v as { current_meter_value?: unknown }).current_meter_value ?? 0);
-        const st = String((v as { vehicle_status_name?: unknown }).vehicle_status_name ?? '').toLowerCase();
-        const make = String((v as { make?: unknown }).make ?? '');
-        return { truck: name, odometer: Number.isFinite(odo) ? odo : 0, make, status: st.includes('out of service') ? 'out_of_service' as const : 'in_service' as const, source: 'fleetio' as const };
-      }).filter((u) => u.truck);
-    } catch (e) {
-      console.error('Fleetio read failed — using mock', e);
-      return mockFleetio.units();
-    }
-  }
 }
 
 export function samsaraClient(): SamsaraClient { void integrationConfig; return mockSamsara; }
-export function fleetioClient(): FleetioClient { return fleetioConfigured() ? liveFleetio : mockFleetio; }
+/* live connector when it's turned on AND Firebase is configured; otherwise the
+   bundled Fleetio export (which is your real fleet as of the last export). */
+export function fleetioClient(): FleetioClient { return (firebaseEnabled && fleetioLiveEnabled()) ? proxyFleetio : mockFleetio; }
 const mockSamsara = new MockSamsara();
 const mockFleetio = new MockFleetio();
-const liveFleetio = new LiveFleetio();
+const proxyFleetio = new ProxyFleetio();

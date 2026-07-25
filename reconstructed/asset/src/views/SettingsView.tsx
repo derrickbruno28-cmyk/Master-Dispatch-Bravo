@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { samsaraOrgs, setSamsaraOrgKey, geofenceSourceId, setGeofenceSourceId, maskKey, samsaraStatus, samsara, type ConnStatus, type SamsaraOrg } from '../integrations/samsara';
-import { fleetioClient } from '../integrations/telematics';
+import { fleetioClient, testFleetioProxy } from '../integrations/telematics';
+import { fleetioLiveEnabled, setFleetioLive } from '../integrations/config';
 import { FLEETIO_UNITS } from '../data/fleetUnits';
 import { maptilerKey, setMaptilerKey, maptilerMasked } from '../integrations/mapstyle';
 import { onChange, emitChange } from '../data/bus';
@@ -39,6 +40,16 @@ export default function SettingsView() {
   const [restoring, setRestoring] = useState(false);
   const [restoreMsg, setRestoreMsg] = useState('');
   const counts = localCounts();
+
+  /* Fleetio live-sync toggle + connectivity test */
+  const [fltLive, setFltLive] = useState<boolean>(() => fleetioLiveEnabled());
+  const [fltTest, setFltTest] = useState<{ busy: boolean; msg: string; ok?: boolean }>({ busy: false, msg: '' });
+  function toggleFltLive(on: boolean) { setFleetioLive(on); setFltLive(on); emitChange(); }
+  async function testFlt() {
+    setFltTest({ busy: true, msg: '' });
+    const r = await testFleetioProxy();
+    setFltTest({ busy: false, ok: r.ok, msg: r.ok ? `✓ Connected — ${r.count} vehicles read from Fleetio.` : `✕ ${r.error}` });
+  }
 
   const [diag, setDiag] = useState<Diag | null>(null);
   const [diagBusy, setDiagBusy] = useState(false);
@@ -199,11 +210,22 @@ export default function SettingsView() {
           <IntgFeature icon="🛞" title="Odometer & make" desc="Per-unit odometer + make from the export — drives the A→D rating you set." />
           <IntgFeature icon="⛔" title="In / out of service" desc="Out-of-service & in-shop units are blocked from matrix assignment." />
         </div>
-        <div className="intg-mock-note">
-          <b>To go fully live</b> (hourly auto-refresh from Fleetio's API): Fleetio can't be called safely from the browser, so it needs a small
-          <b> read-only backend connector</b> that holds your API token as a server secret. Get a read-only <b>API token</b> + <b>Account token</b> from
-          Fleetio → <b>Account Settings → Fleetio API Keys</b>, then the connector syncs odometers &amp; status on a schedule. Ask to have it built.
+        <div className="intg-live-row">
+          <label className="samsara-geo-pick" style={{ fontSize: 13 }}>
+            <input type="checkbox" checked={fltLive} onChange={(e) => toggleFltLive(e.target.checked)} />
+            <b>Live Fleetio sync</b> — read odometers &amp; status from Fleetio hourly (through the connector)
+          </label>
+          <button type="button" className="am-clear" disabled={fltTest.busy} onClick={testFlt}>{fltTest.busy ? 'Testing…' : '🔌 Test connection'}</button>
         </div>
+        {fltTest.msg && <div className="am-notice" style={{ color: fltTest.ok ? 'var(--green)' : 'var(--red)', marginTop: 6 }}>{fltTest.msg}</div>}
+        {fltLive
+          ? <div className="intg-mock-note" style={{ borderColor: 'var(--green)' }}>Live sync is <b>ON</b> — the app reads from the Fleetio connector; if it's ever unreachable it falls back to the export automatically (nothing breaks).</div>
+          : <div className="intg-mock-note">
+              <b>To turn on live sync:</b> deploy the read-only connector once, then flip the switch above.
+              Get a read-only <b>API token</b> + <b>Account token</b> from Fleetio → <b>Account Settings → Fleetio API Keys</b>,
+              add them as the repo secrets <code>FLEETIO_API_TOKEN</code> / <code>FLEETIO_ACCOUNT_TOKEN</code>, run the
+              <b> “Deploy Asset Functions” </b> action, then <b>Test connection</b> here and switch it on. Until then the app runs on the export.
+            </div>}
       </div>
     </div>
   );

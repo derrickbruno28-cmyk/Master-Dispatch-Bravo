@@ -1,0 +1,56 @@
+name: Deploy Asset Functions (Fleetio connector)
+
+# Deploys the read-only Fleetio connector (Cloud Function) to asset-matrix-gh.
+# Manual only — it NEVER runs on push, so it can't affect the hosting pipeline.
+#
+# One-time prerequisites (repo → Settings → Secrets and variables → Actions):
+#   FIREBASE_TOKEN          — already set (used by the hosting deploy)
+#   FLEETIO_API_TOKEN       — a READ-ONLY Fleetio API token
+#   FLEETIO_ACCOUNT_TOKEN   — your Fleetio Account token
+# Also: asset-matrix-gh must be on the Blaze (pay-as-you-go) plan — Cloud
+# Functions require it (this connector's usage sits well inside the free tier).
+#
+# Run it from the Actions tab → "Deploy Asset Functions (Fleetio connector)" →
+# Run workflow. It writes the two tokens into Google Secret Manager and deploys
+# the function. After it's green, open Integrations → Fleetio → Test connection,
+# then switch Live Fleetio sync on.
+
+on:
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the repo
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Build the function
+        working-directory: reconstructed/asset/functions
+        run: |
+          npm install
+          npm run build
+
+      - name: Write Fleetio tokens to Secret Manager
+        working-directory: reconstructed/asset
+        env:
+          FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}
+          FLEETIO_API_TOKEN: ${{ secrets.FLEETIO_API_TOKEN }}
+          FLEETIO_ACCOUNT_TOKEN: ${{ secrets.FLEETIO_ACCOUNT_TOKEN }}
+        run: |
+          printf '%s' "$FLEETIO_API_TOKEN" | npx --yes firebase-tools@15 functions:secrets:set FLEETIO_API_TOKEN --project asset-matrix-gh --token "$FIREBASE_TOKEN" --data-file=-
+          printf '%s' "$FLEETIO_ACCOUNT_TOKEN" | npx --yes firebase-tools@15 functions:secrets:set FLEETIO_ACCOUNT_TOKEN --project asset-matrix-gh --token "$FIREBASE_TOKEN" --data-file=-
+
+      - name: Deploy the connector
+        working-directory: reconstructed/asset
+        env:
+          FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}
+        run: npx --yes firebase-tools@15 deploy --only functions --project asset-matrix-gh --token "$FIREBASE_TOKEN" --non-interactive --force

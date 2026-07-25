@@ -1,0 +1,17 @@
+{
+  "name": "asset-matrix-functions",
+  "description": "Read-only Fleetio connector for the Asset Matrix",
+  "private": true,
+  "engines": { "node": "20" },
+  "main": "lib/index.js",
+  "scripts": {
+    "build": "tsc"
+  },
+  "dependencies": {
+    "firebase-admin": "^12.6.0",
+    "firebase-functions": "^5.1.1"
+  },
+  "devDependencies": {
+    "typescript": "^5.5.4"
+  }
+}
