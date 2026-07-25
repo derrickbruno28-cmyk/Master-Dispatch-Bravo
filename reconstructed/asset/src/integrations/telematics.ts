@@ -20,9 +20,12 @@ export interface SamsaraClient {
 
 export type ServiceStatus = 'in_service' | 'out_of_service';
 export interface VehicleService { truck: string; status: ServiceStatus; reason?: string; since?: string; source: 'fleetio' | 'mock' }
+/* one Fleetio vehicle (READ ONLY — Asset Matrix never writes back to Fleetio) */
+export interface FleetioUnit { truck: string; odometer: number; status: ServiceStatus; source: 'fleetio' | 'mock' }
 export interface FleetioClient {
   readonly connected: boolean; readonly label: string;
   serviceStatuses(): Promise<VehicleService[]>;
+  units(): Promise<FleetioUnit[]>;   // odometer + service per vehicle
 }
 
 /* ---- mock Samsara: park each truck at its current city's coordinates ---- */
@@ -57,6 +60,13 @@ export function setLocalOos(truck: string, oos: boolean) {
   try { localStorage.setItem(OOS_KEY, JSON.stringify([...list])); } catch { /* ignore */ }
 }
 
+/* deterministic mock odometer per truck # so the demo is stable (real reading
+   comes from Fleetio's current_meter_value once a token is configured). */
+function mockOdometer(tractor: string): number {
+  let h = 0; for (const ch of tractor) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
+  return 90_000 + (h % 640) * 1000;   // ~90k–730k miles
+}
+
 class MockFleetio implements FleetioClient {
   readonly connected = true;
   readonly label = fleetioConfigured() ? 'Fleetio: token set (impl pending)' : 'Fleetio: connected (mock)';
@@ -69,13 +79,56 @@ class MockFleetio implements FleetioClient {
       since: undefined, source: 'mock' as const,
     }));
   }
+  async units(): Promise<FleetioUnit[]> {
+    const oos = new Set(localOosList());
+    return loadFleet().map((t) => ({
+      truck: t.tractor, odometer: mockOdometer(t.tractor),
+      status: oos.has(t.tractor) ? 'out_of_service' as const : 'in_service' as const, source: 'mock' as const,
+    }));
+  }
 }
-/* TODO(go-live): real Fleetio — GET /api/v1/vehicles with
-   Authorization: Token ${integrationConfig.fleetioToken},
-   Account-Token: ${integrationConfig.fleetioAccount}; match on vehicle name ==
-   tractor number; out_of_service = vehicle_status_name === 'Out of Service'. */
+
+/* Real Fleetio — READ ONLY (no writes are ever sent to Fleetio). Reads
+   GET /api/v1/vehicles when a token + account are configured; on any failure it
+   falls back to the mock so the app never breaks. NOTE for go-live: Fleetio's
+   API may not send CORS headers for direct browser calls — if so, route this
+   through a small read-only proxy / Cloud Function (same pattern as routing). */
+class LiveFleetio implements FleetioClient {
+  readonly connected = true;
+  readonly label = 'Fleetio: connected (live, read-only)';
+  private async fetchVehicles(): Promise<Record<string, unknown>[]> {
+    const res = await fetch('https://secure.fleetio.com/api/v1/vehicles?per_page=100', {
+      headers: {
+        Authorization: `Token ${integrationConfig.fleetioToken}`,
+        'Account-Token': integrationConfig.fleetioAccount,
+        'Content-Type': 'application/json',
+      },
+    });
+    if (!res.ok) throw new Error(`Fleetio ${res.status}`);
+    const body = await res.json();
+    return Array.isArray(body) ? body : (body.records ?? []);
+  }
+  async serviceStatuses(): Promise<VehicleService[]> {
+    return (await this.units()).map((u) => ({ truck: u.truck, status: u.status, source: 'fleetio' as const }));
+  }
+  async units(): Promise<FleetioUnit[]> {
+    try {
+      const rows = await this.fetchVehicles();
+      return rows.map((v) => {
+        const name = String((v as { name?: unknown }).name ?? '').trim();
+        const odo = Number((v as { current_meter_value?: unknown }).current_meter_value ?? 0);
+        const st = String((v as { vehicle_status_name?: unknown }).vehicle_status_name ?? '').toLowerCase();
+        return { truck: name, odometer: Number.isFinite(odo) ? odo : 0, status: st.includes('out of service') ? 'out_of_service' as const : 'in_service' as const, source: 'fleetio' as const };
+      }).filter((u) => u.truck);
+    } catch (e) {
+      console.error('Fleetio read failed — using mock', e);
+      return mockFleetio.units();
+    }
+  }
+}
 
 export function samsaraClient(): SamsaraClient { void integrationConfig; return mockSamsara; }
-export function fleetioClient(): FleetioClient { return mockFleetio; }
+export function fleetioClient(): FleetioClient { return fleetioConfigured() ? liveFleetio : mockFleetio; }
 const mockSamsara = new MockSamsara();
 const mockFleetio = new MockFleetio();
+const liveFleetio = new LiveFleetio();

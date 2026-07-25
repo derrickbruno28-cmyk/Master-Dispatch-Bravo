@@ -1,12 +1,11 @@
 import { useEffect, useMemo, useState } from 'react';
-import { loadAll, saveLoad, fmtMoney, fmtMiles, type Load } from '../data/loadsStore';
+import { loadAll, fmtMoney, fmtMiles, type Load } from '../data/loadsStore';
 import { onChange } from '../data/bus';
 import { LOAD_STATUS_LABEL, LOAD_STATUS_COLOR } from '../data/schedule';
 
-/* Loads — every load we've built, with a date-range filter so you can pull up
-   what went out over a stretch and confirm it completed. This is the flat,
-   searchable ledger behind the Matrix cells (the Matrix is the weekly view;
-   this is the "show me everything between these two dates" view). */
+/* Loads — a READ-ONLY ledger of every load we've built, with a date-range filter
+   to pull up what went out over a stretch. Status is view-only here: a load is
+   marked Completed ONLY from the Asset Matrix calendar — nowhere else. */
 
 function isoToday(): string { return new Date().toISOString().slice(0, 10); }
 function daysAgo(n: number): string { const d = new Date(); d.setDate(d.getDate() - n); return d.toISOString().slice(0, 10); }
@@ -19,7 +18,6 @@ export default function LoadsView() {
   const [to, setTo] = useState<string>(() => isoToday());
   const [q, setQ] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('ALL');
-  const [busy, setBusy] = useState<string | null>(null);
 
   useEffect(() => onChange(() => setLoads(loadAll())), []);
 
@@ -33,15 +31,6 @@ export default function LoadsView() {
   }, [loads, from, to, q, statusFilter]);
 
   const completedN = rows.filter((l) => l.status === 'completed' || l.status === 'delivered').length;
-
-  async function markCompleted(l: Load) {
-    setBusy(l.id);
-    await saveLoad({ ...l, status: 'completed' });
-    setBusy(null);
-  }
-  async function setStatus(l: Load, status: string) {
-    await saveLoad({ ...l, status });
-  }
 
   return (
     <div className="am-page">
@@ -64,15 +53,16 @@ export default function LoadsView() {
           <input className="am-input" style={{ maxWidth: 200 }} placeholder="Search route / customer / truck…" value={q} onChange={(e) => setQ(e.target.value)} />
         </div>
         <span className="am-muted">{rows.length} load{rows.length === 1 ? '' : 's'} · {completedN} completed/delivered</span>
+        <span className="am-muted" style={{ fontSize: 11.5 }}>🔒 Read-only ledger — a load is marked <b>Completed</b> only from the Asset Matrix.</span>
       </div>
 
       <div className="am-scroll">
         <table className="am-grid am-fleet">
           <thead>
-            <tr><th>Date</th><th>Route</th><th>Customer</th><th>Truck</th><th>Trailer</th><th>Miles</th><th>Rate</th><th>Status</th><th></th></tr>
+            <tr><th>Date</th><th>Route</th><th>Customer</th><th>Truck</th><th>Trailer</th><th>Miles</th><th>Rate</th><th>Status</th></tr>
           </thead>
           <tbody>
-            {rows.length === 0 && <tr><td colSpan={9} className="am-muted" style={{ textAlign: 'center', padding: 16 }}>No loads in this date range.</td></tr>}
+            {rows.length === 0 && <tr><td colSpan={8} className="am-muted" style={{ textAlign: 'center', padding: 16 }}>No loads in this date range.</td></tr>}
             {rows.map((l) => {
               const done = l.status === 'completed';
               return (
@@ -84,16 +74,7 @@ export default function LoadsView() {
                   <td className="am-muted">{l.assignedTrailer || '—'}</td>
                   <td className="am-muted">{fmtMiles(l.laneMiles)}</td>
                   <td className="am-muted">{fmtMoney(l.rate)}</td>
-                  <td>
-                    <select className="am-input loads-statussel" value={l.status} style={{ color: LOAD_STATUS_COLOR[l.status] ?? 'var(--text)' }} onChange={(e) => setStatus(l, e.target.value)}>
-                      {STATUS_ORDER.map((s) => <option key={s} value={s}>{LOAD_STATUS_LABEL[s] ?? s}</option>)}
-                    </select>
-                  </td>
-                  <td className="fleet-actions">
-                    {done
-                      ? <span className="loads-donechip">✓ Completed</span>
-                      : <button className="am-save" disabled={busy === l.id} onClick={() => markCompleted(l)}>Mark completed</button>}
-                  </td>
+                  <td><span className="am-pill" style={{ color: LOAD_STATUS_COLOR[l.status] ?? 'var(--muted)' }}>{LOAD_STATUS_LABEL[l.status] ?? l.status}</span></td>
                 </tr>
               );
             })}

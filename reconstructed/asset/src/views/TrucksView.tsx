@@ -2,10 +2,14 @@ import { useEffect, useMemo, useState } from 'react';
 import { loadFleet, saveTruck, removeTruck, blankTruck, TRUCK_TYPES, TERMINALS, TERMINAL_LABELS, type FleetTruck } from '../data/fleetStore';
 import { canDelete } from '../data/permStore';
 import { onChange } from '../data/bus';
+import { fleetioClient, type ServiceStatus } from '../integrations/telematics';
+import { importFromFleetio } from '../data/fleetioSync';
+import { RATING_COLORS, fmtOdometer } from '../data/truckRating';
 
-/* Trucks — the tractor roster (equipment-centric). Truck #, type, rating, home
-   terminal and where it is now. Team make-up (which two drivers) is managed on
-   Team Status; this page is the master list of the trucks themselves. */
+/* Trucks — the tractor roster (equipment-centric) + Fleetio unit data. Each unit
+   carries an A/B/C/D rating by odometer, its live odometer (read from Fleetio
+   hourly, never written back), and in-service / out-of-service status. Team
+   make-up is managed on Team Status. */
 
 export default function TrucksView() {
   const [fleet, setFleet] = useState<FleetTruck[]>(() => loadFleet());
@@ -14,13 +18,26 @@ export default function TrucksView() {
   const [isNew, setIsNew] = useState(false);
   const [confirmDel, setConfirmDel] = useState<string | null>(null);
   const [canDel, setCanDel] = useState<boolean>(() => canDelete());
+  const [svc, setSvc] = useState<Record<string, ServiceStatus>>({});
+  const [importing, setImporting] = useState(false);
+  const [notice, setNotice] = useState('');
+  const fio = fleetioClient();
 
   useEffect(() => onChange(() => { setFleet(loadFleet()); setCanDel(canDelete()); }), []);
+  useEffect(() => { void fio.serviceStatuses().then((list) => setSvc(Object.fromEntries(list.map((s) => [s.truck, s.status])))); }, [fleet]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  async function runImport() {
+    setImporting(true);
+    const r = await importFromFleetio();
+    setImporting(false);
+    setNotice(`✓ Fleetio import — ${r.created} new profile${r.created === 1 ? '' : 's'} created, ${r.updated} updated (odometer + rating) from ${r.total} units.`);
+    window.setTimeout(() => setNotice(''), 5000);
+  }
 
   const rows = useMemo(() => {
     const n = q.trim().toLowerCase();
     return fleet
-      .filter((t) => !n || `${t.tractor} ${t.type} ${t.rating} ${t.homeCity} ${t.currentCity} ${t.driver1} ${t.driver2}`.toLowerCase().includes(n))
+      .filter((t) => !n || `${t.tractor} ${t.type} ${t.unitRating} ${t.homeCity} ${t.currentCity} ${t.driver1} ${t.driver2}`.toLowerCase().includes(n))
       .slice().sort((a, b) => a.tractor.localeCompare(b.tractor, undefined, { numeric: true }));
   }, [fleet, q]);
 
@@ -28,23 +45,36 @@ export default function TrucksView() {
     <div className="am-page">
       <div className="am-head">
         <h2>Trucks</h2>
-        <input className="am-input" style={{ maxWidth: 220 }} placeholder="Search truck / type / city…" value={q} onChange={(e) => setQ(e.target.value)} />
+        <input className="am-input" style={{ maxWidth: 200 }} placeholder="Search truck / rating / city…" value={q} onChange={(e) => setQ(e.target.value)} />
         <span className="am-muted">{rows.length} of {fleet.length} trucks</span>
+        <span className="fleet-io-badge" title="Fleetio is read-only — Asset Matrix never writes to Fleetio">🔗 {fio.label}</span>
+        <button className="am-clear" disabled={importing} title="Create a profile for every Fleetio unit + pull odometer & rating (read-only)" onClick={runImport}>⤓ {importing ? 'Importing…' : 'Import from Fleetio'}</button>
         <button className="am-save fleet-add" onClick={() => { setEditing(blankTruck()); setIsNew(true); }}>＋ Add Truck</button>
+      </div>
+      {notice && <div className="am-notice">{notice}</div>}
+      <div className="am-muted" style={{ fontSize: 11.5, margin: '2px 0 10px' }}>
+        Unit rating (A → D) is by odometer — placeholder cutoffs until the Truck Rating SOP is dropped in; odometer refreshes from Fleetio hourly. Out-of-service units can't be assigned on the Asset Matrix.
       </div>
 
       <div className="am-scroll">
         <table className="am-grid am-fleet">
-          <thead><tr><th>Truck #</th><th>Type</th><th>Rating</th><th>Home terminal</th><th>Current</th><th>Drivers (team)</th><th></th></tr></thead>
+          <thead><tr><th>Truck #</th><th>Rating</th><th>Odometer</th><th>Service</th><th>Type</th><th>Home terminal</th><th>Drivers (team)</th><th></th></tr></thead>
           <tbody>
-            {rows.length === 0 && <tr><td colSpan={7} className="am-muted" style={{ textAlign: 'center', padding: 16 }}>No trucks.</td></tr>}
-            {rows.map((t) => (
-              <tr key={t.tractor}>
+            {rows.length === 0 && <tr><td colSpan={8} className="am-muted" style={{ textAlign: 'center', padding: 16 }}>No trucks.</td></tr>}
+            {rows.map((t) => {
+              const oos = svc[t.tractor] === 'out_of_service';
+              return (
+              <tr key={t.tractor} className={oos ? 'fleet-shutdown' : ''}>
                 <td className="am-tractor">#{t.tractor}</td>
+                <td>{t.unitRating
+                  ? <span className="unit-rating" style={{ background: RATING_COLORS[t.unitRating] ?? 'var(--muted)' }}>{t.unitRating}</span>
+                  : <span className="am-muted">—</span>}</td>
+                <td className="am-muted" style={{ fontVariantNumeric: 'tabular-nums' }}>{fmtOdometer(t.odometer)}</td>
+                <td>{oos
+                  ? <span className="am-pill" style={{ color: 'var(--red)' }}>⛔ Out of service</span>
+                  : <span className="am-pill" style={{ color: 'var(--green)' }}>● In service</span>}</td>
                 <td className="am-muted">{t.type}</td>
-                <td>{t.rating || <span className="am-muted">—</span>}</td>
                 <td>{TERMINAL_LABELS[t.homeCity] ?? t.homeCity}</td>
-                <td className="am-muted">{t.currentCity || '—'}</td>
                 <td>{[t.driver1, t.driver2].filter(Boolean).join(' · ') || <span className="am-muted">unassigned</span>}</td>
                 <td className="fleet-actions">
                   {confirmDel === t.tractor ? (
@@ -63,7 +93,8 @@ export default function TrucksView() {
                   )}
                 </td>
               </tr>
-            ))}
+              );
+            })}
           </tbody>
         </table>
       </div>

@@ -22,6 +22,7 @@ import { ROUTES } from './data/fleet';
 import { canManageRoles } from './data/permStore';
 import { onChange } from './data/bus';
 import { watchForUpdate } from './data/versionCheck';
+import { startOdometerSync } from './data/fleetioSync';
 
 /* Asset Matrix — the asset-side master dispatch. Standalone: it holds our own
    trucks, the USPS route data, scheduling, driver availability, and the route
@@ -29,7 +30,7 @@ import { watchForUpdate } from './data/versionCheck';
    kept minimal, and driver / team / route look-ups are separate filters below
    the header (not one catch-all search box). */
 
-const APP_VERSION = '0.21.0';
+const APP_VERSION = '0.22.0';
 
 type Tab = 'matrix' | 'optimizer' | 'otp' | 'covered' | 'repo' | 'fleet' | 'fleet-map' | 'fleet-oos'
   | 'trucks' | 'trailers' | 'loads' | 'drivers' | 'roles'
@@ -130,6 +131,9 @@ export default function App() {
 
   /* watch for a newer deploy → prompt a one-tap refresh (no more stale versions) */
   useEffect(() => watchForUpdate(() => setUpdateReady(true)), []);
+
+  /* read truck odometers from Fleetio now + every hour (read-only) */
+  useEffect(() => { startOdometerSync(); }, []);
 
   /* collapse the drawer when the window shrinks to mobile so it doesn't sit open over content */
   useEffect(() => {

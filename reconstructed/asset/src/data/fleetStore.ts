@@ -16,6 +16,9 @@ export interface FleetTruck {
   flyer?: '' | 'driver' | 'team';  // dispatch flyer sent → drivers turn yellow
   confirm1?: boolean;       // driver 1 confirmed the load
   confirm2?: boolean;       // driver 2 confirmed the load
+  odometer?: number;        // odometer miles — READ from Fleetio (hourly), never written back
+  odoAt?: string;           // when the odometer was last synced from Fleetio (ISO)
+  unitRating?: string;      // A/B/C/D by odometer (rateByOdometer / SOP)
 }
 
 export { TERMINALS, TERMINAL_LABELS };
@@ -35,6 +38,9 @@ function normTruck(t: Partial<FleetTruck>): FleetTruck {
     flyer: (t.flyer ?? '') as FleetTruck['flyer'],
     confirm1: t.confirm1 ?? false,
     confirm2: t.confirm2 ?? false,
+    odometer: t.odometer,
+    odoAt: t.odoAt ?? '',
+    unitRating: t.unitRating ?? '',
   };
 }
 function seedTrucks(): FleetTruck[] { return SEED.map((t) => normTruck(t)); }
