@@ -63,7 +63,20 @@ export default function SettingsView() {
   async function testFlt() {
     setFltTest({ busy: true, msg: '' });
     const r = await testFleetioProxy();
-    setFltTest({ busy: false, ok: r.ok, msg: r.ok ? `✓ Connected — ${r.count} vehicles read from Fleetio.` : `✕ ${r.error}` });
+    let msg: string;
+    if (!r.ok) {
+      msg = `✕ ${r.error}`;
+    } else {
+      msg = `✓ Connected — ${r.count} vehicles read from Fleetio (In service ${r.inService} · Out of service ${r.outOfService}).`;
+      if (r.statusCounts && Object.keys(r.statusCounts).length) {
+        const breakdown = Object.entries(r.statusCounts)
+          .sort((a, b) => b[1] - a[1])
+          .map(([k, n]) => `${k}: ${n}`)
+          .join(' · ');
+        msg += `\nFleetio statuses → ${breakdown}`;
+      }
+    }
+    setFltTest({ busy: false, ok: r.ok, msg });
   }
 
   const [diag, setDiag] = useState<Diag | null>(null);

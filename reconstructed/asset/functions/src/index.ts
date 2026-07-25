@@ -23,16 +23,26 @@ const FLEETIO_ACCOUNT_TOKEN = defineSecret('FLEETIO_ACCOUNT_TOKEN');
 
 const COMPANY_EMAIL = /@(ghlogisticsllc|ajgtransport)\.com$/i;
 
-type FleetioState = 'Active' | 'Out of Service' | 'In Shop' | 'Other';
-function normStatus(s: string): FleetioState {
-  const t = (s || '').toLowerCase();
-  if (t.includes('out of service')) return 'Out of Service';
-  if (t.includes('in shop') || t.includes('in_shop')) return 'In Shop';
-  if (t.includes('active')) return 'Active';
-  return 'Other';
+/* A truck is available ONLY when Fleetio marks it Active (or "In Service").
+   ANY other status — Out of Service, In Shop, Inactive, Down, Maintenance, a
+   custom status, etc. — means it can't be assigned, so it maps to out-of-service.
+   Blank/unknown is treated as available (don't block a truck we can't classify). */
+function isFleetioActive(raw: string): boolean {
+  const t = (raw || '').trim().toLowerCase();
+  if (!t) return true;                                  // unknown → assume available
+  if (/out.?of.?service|\boos\b|in.?shop|inactive|\bdown\b|maintenance|repair|shop|sold|retired|archiv|disposed|totaled/.test(t)) return false;
+  return /active|in.?service|available|operational|ready|in.?use|assigned/.test(t) || false;
 }
 
-interface SanitizedUnit { truck: string; make: string; fleetioStatus: FleetioState }
+/* pull the vehicle status string from whichever field this Fleetio account uses */
+function readStatus(v: Record<string, unknown>): string {
+  const vs = v.vehicle_status as { name?: unknown } | undefined;
+  return String(
+    v.vehicle_status_name ?? (vs && vs.name) ?? v.status_name ?? v.status ?? v.vehicle_status_label ?? '',
+  ).trim();
+}
+
+interface SanitizedUnit { truck: string; make: string; rawStatus: string; inService: boolean }
 
 export const fleetioVehicles = onRequest(
   {
@@ -70,6 +80,7 @@ export const fleetioVehicles = onRequest(
     // 2) pull every vehicle (paginated) and 3) sanitize
     try {
       const units: SanitizedUnit[] = [];
+      const statusCounts: Record<string, number> = {};   // raw Fleetio status → how many, for diagnostics
       for (let page = 1; page <= 25; page++) {
         const r = await fetch(`https://secure.fleetio.com/api/v1/vehicles?per_page=100&page=${page}`, {
           headers: {
@@ -87,16 +98,21 @@ export const fleetioVehicles = onRequest(
           const truck = String(v.name ?? '').trim();
           if (!truck) continue;
           // odometer (current_meter_value) is intentionally NOT read from Fleetio
+          const rawStatus = readStatus(v);
+          const inService = isFleetioActive(rawStatus);
+          const key = rawStatus || '(blank)';
+          statusCounts[key] = (statusCounts[key] ?? 0) + 1;
           units.push({
             truck,
             make: String(v.make ?? '').trim(),
-            fleetioStatus: normStatus(String(v.vehicle_status_name ?? '')),
+            rawStatus,
+            inService,
           });
         }
         if (rows.length < 100) break;
       }
       res.set('Cache-Control', 'private, max-age=300');
-      res.json({ units, count: units.length, syncedAt: new Date().toISOString() });
+      res.json({ units, count: units.length, syncedAt: new Date().toISOString(), statusCounts });
     } catch (e) {
       res.status(502).json({ error: 'Fleetio fetch failed.', detail: String((e as Error)?.message || e) });
     }

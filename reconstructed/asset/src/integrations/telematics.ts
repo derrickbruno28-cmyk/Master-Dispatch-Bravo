@@ -100,11 +100,15 @@ class MockFleetio implements FleetioClient {
    user's Firebase ID token; the function verifies the account server-side, reads
    the Fleetio secrets, and returns a sanitized vehicle list. */
 /* the connector returns make + service only — odometers are never read from
-   Fleetio (kept as set manually / from the export). */
-export interface ProxyUnit { truck: string; make: string; fleetioStatus: string }
+   Fleetio (kept as set manually / from the export). rawStatus is the exact
+   Fleetio status string (for diagnostics); inService is the server's verdict —
+   true only when Fleetio marks the unit Active/In Service. */
+export interface ProxyUnit { truck: string; make: string; rawStatus: string; inService: boolean }
 export function fleetioProxyUrl(): string { return `https://us-central1-${firebaseProjectId}.cloudfunctions.net/fleetioVehicles`; }
 
-async function fetchProxyUnits(): Promise<ProxyUnit[]> {
+interface ProxyResponse { units: ProxyUnit[]; count: number; statusCounts?: Record<string, number> }
+
+async function fetchProxy(): Promise<ProxyResponse> {
   const idt = await currentIdToken();
   if (!idt) throw new Error('Sign-in required for live Fleetio sync.');
   const res = await fetch(fleetioProxyUrl(), { headers: { Authorization: `Bearer ${idt}` } });
@@ -114,13 +118,20 @@ async function fetchProxyUnits(): Promise<ProxyUnit[]> {
     throw new Error(msg);
   }
   const body = await res.json();
-  return (body.units ?? []) as ProxyUnit[];
+  return { units: (body.units ?? []) as ProxyUnit[], count: body.count ?? 0, statusCounts: body.statusCounts };
 }
 
-/* one-off connectivity check for the Integrations page — returns a count or the
-   server's error message, without changing what the app is using. */
-export async function testFleetioProxy(): Promise<{ ok: boolean; count?: number; error?: string }> {
-  try { const units = await fetchProxyUnits(); return { ok: true, count: units.length }; }
+async function fetchProxyUnits(): Promise<ProxyUnit[]> { return (await fetchProxy()).units; }
+
+/* one-off connectivity check for the Integrations page — returns a count +
+   the Fleetio status breakdown (or the server's error message), without
+   changing what the app is using. */
+export async function testFleetioProxy(): Promise<{ ok: boolean; count?: number; inService?: number; outOfService?: number; statusCounts?: Record<string, number>; error?: string }> {
+  try {
+    const r = await fetchProxy();
+    const inService = r.units.filter((u) => u.inService).length;
+    return { ok: true, count: r.units.length, inService, outOfService: r.units.length - inService, statusCounts: r.statusCounts };
+  }
   catch (e) { return { ok: false, error: (e as Error).message }; }
 }
 
@@ -134,8 +145,7 @@ class ProxyFleetio implements FleetioClient {
       truck: u.truck,
       odometer: odoByTruck.get(u.truck) ?? 0,   // keep the existing odometer — never read from Fleetio
       make: u.make || '',
-      status: (oos.has(u.truck) || u.fleetioStatus === 'Out of Service' || u.fleetioStatus === 'In Shop')
-        ? 'out_of_service' as const : 'in_service' as const,
+      status: (oos.has(u.truck) || !u.inService) ? 'out_of_service' as const : 'in_service' as const,
       source: 'fleetio' as const,
     }));
   }
