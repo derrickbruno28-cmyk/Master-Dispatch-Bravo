@@ -19,11 +19,12 @@ export async function importFromFleetio(): Promise<ImportResult> {
   for (const u of units) {
     if (!u.truck) continue;
     const existing = byTractor.get(u.truck);
+    const rating = rateByOdometer(u.odometer, u.make);
     if (existing) {
-      saveTruck({ ...existing, odometer: u.odometer, odoAt: now, unitRating: rateByOdometer(u.odometer) });
+      saveTruck({ ...existing, odometer: u.odometer, odoAt: now, make: u.make || existing.make, unitRating: rating });
       updated++;
     } else {
-      const t: FleetTruck = { ...blankTruck(), tractor: u.truck, odometer: u.odometer, odoAt: now, unitRating: rateByOdometer(u.odometer) };
+      const t: FleetTruck = { ...blankTruck(), tractor: u.truck, odometer: u.odometer, odoAt: now, make: u.make, unitRating: rating };
       saveTruck(t);
       created++;
     }
@@ -35,13 +36,16 @@ export async function importFromFleetio(): Promise<ImportResult> {
    only writes when the reading actually changed (no churn). */
 export async function syncOdometersOnce(): Promise<number> {
   const units = await fleetioClient().units();
-  const odo = new Map(units.map((u) => [u.truck, u.odometer]));
+  const byTruck = new Map(units.map((u) => [u.truck, u]));
   const now = new Date().toISOString();
   let n = 0;
   for (const t of loadFleet()) {
-    const miles = odo.get(t.tractor);
-    if (miles == null || miles === t.odometer) continue;
-    saveTruck({ ...t, odometer: miles, odoAt: now, unitRating: rateByOdometer(miles) });
+    const u = byTruck.get(t.tractor);
+    if (!u) continue;
+    const make = u.make || t.make || '';
+    const rating = rateByOdometer(u.odometer, make);
+    if (u.odometer === t.odometer && make === (t.make || '') && rating === (t.unitRating || '')) continue; // no change
+    saveTruck({ ...t, odometer: u.odometer, odoAt: now, make, unitRating: rating });
     n++;
   }
   return n;

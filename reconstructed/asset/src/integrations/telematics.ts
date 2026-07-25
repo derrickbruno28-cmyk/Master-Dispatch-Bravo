@@ -21,7 +21,7 @@ export interface SamsaraClient {
 export type ServiceStatus = 'in_service' | 'out_of_service';
 export interface VehicleService { truck: string; status: ServiceStatus; reason?: string; since?: string; source: 'fleetio' | 'mock' }
 /* one Fleetio vehicle (READ ONLY — Asset Matrix never writes back to Fleetio) */
-export interface FleetioUnit { truck: string; odometer: number; status: ServiceStatus; source: 'fleetio' | 'mock' }
+export interface FleetioUnit { truck: string; odometer: number; make: string; status: ServiceStatus; source: 'fleetio' | 'mock' }
 export interface FleetioClient {
   readonly connected: boolean; readonly label: string;
   serviceStatuses(): Promise<VehicleService[]>;
@@ -60,12 +60,11 @@ export function setLocalOos(truck: string, oos: boolean) {
   try { localStorage.setItem(OOS_KEY, JSON.stringify([...list])); } catch { /* ignore */ }
 }
 
-/* deterministic mock odometer per truck # so the demo is stable (real reading
-   comes from Fleetio's current_meter_value once a token is configured). */
-function mockOdometer(tractor: string): number {
-  let h = 0; for (const ch of tractor) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
-  return 90_000 + (h % 640) * 1000;   // ~90k–730k miles
-}
+/* deterministic mock odometer + make per truck # so the demo is stable and spans
+   all four rating tiers (real values come from Fleetio once a token is set). */
+function mockHash(tractor: string): number { let h = 0; for (const ch of tractor) h = (h * 31 + ch.charCodeAt(0)) >>> 0; return h; }
+function mockOdometer(tractor: string): number { return 60_000 + (mockHash(tractor) % 780) * 1000; } // ~60k–840k
+function mockMake(tractor: string): string { return ['International', 'Volvo', 'Peterbilt', 'Freightliner'][mockHash(tractor) % 4]; }
 
 class MockFleetio implements FleetioClient {
   readonly connected = true;
@@ -82,7 +81,7 @@ class MockFleetio implements FleetioClient {
   async units(): Promise<FleetioUnit[]> {
     const oos = new Set(localOosList());
     return loadFleet().map((t) => ({
-      truck: t.tractor, odometer: mockOdometer(t.tractor),
+      truck: t.tractor, odometer: mockOdometer(t.tractor), make: mockMake(t.tractor),
       status: oos.has(t.tractor) ? 'out_of_service' as const : 'in_service' as const, source: 'mock' as const,
     }));
   }
@@ -118,7 +117,8 @@ class LiveFleetio implements FleetioClient {
         const name = String((v as { name?: unknown }).name ?? '').trim();
         const odo = Number((v as { current_meter_value?: unknown }).current_meter_value ?? 0);
         const st = String((v as { vehicle_status_name?: unknown }).vehicle_status_name ?? '').toLowerCase();
-        return { truck: name, odometer: Number.isFinite(odo) ? odo : 0, status: st.includes('out of service') ? 'out_of_service' as const : 'in_service' as const, source: 'fleetio' as const };
+        const make = String((v as { make?: unknown }).make ?? '');
+        return { truck: name, odometer: Number.isFinite(odo) ? odo : 0, make, status: st.includes('out of service') ? 'out_of_service' as const : 'in_service' as const, source: 'fleetio' as const };
       }).filter((u) => u.truck);
     } catch (e) {
       console.error('Fleetio read failed — using mock', e);

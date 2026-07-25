@@ -105,6 +105,8 @@ export function isOwner(): boolean { return currentRole() === 'owner'; }
 export function canDelete(): boolean { const r = currentRole(); return r === 'owner' || r === 'fmt_lead' || r === 'us_ops'; }
 /* add / edit / update info — any recognized role */
 export function canEdit(): boolean { return currentRole() !== ''; }
+/* Financials + Setup are hidden from FMT Lead and FMT — visible to Owner + US Ops only */
+export function canSeeFinancials(): boolean { const r = currentRole(); return r === 'owner' || r === 'us_ops'; }
 
 /* ---- role managers: who can see the Roles tab + assign roles (owner-controlled) ---- */
 function readRoleManagers(): string[] {

@@ -18,7 +18,8 @@ export interface FleetTruck {
   confirm2?: boolean;       // driver 2 confirmed the load
   odometer?: number;        // odometer miles — READ from Fleetio (hourly), never written back
   odoAt?: string;           // when the odometer was last synced from Fleetio (ISO)
-  unitRating?: string;      // A/B/C/D by odometer (rateByOdometer / SOP)
+  make?: string;            // engine/chassis make from Fleetio (drives the rating bands)
+  unitRating?: string;      // A/B/C/D by odometer + make (rateByOdometer / SOP)
 }
 
 export { TERMINALS, TERMINAL_LABELS };
@@ -40,6 +41,7 @@ function normTruck(t: Partial<FleetTruck>): FleetTruck {
     confirm2: t.confirm2 ?? false,
     odometer: t.odometer,
     odoAt: t.odoAt ?? '',
+    make: t.make ?? '',
     unitRating: t.unitRating ?? '',
   };
 }

@@ -7,7 +7,6 @@ import OTPView from './views/OTPView';
 import CoveredView from './views/CoveredView';
 import FleetStatusView from './views/FleetStatusView';
 import FleetMapView from './views/FleetMapView';
-import OutOfServiceView from './views/OutOfServiceView';
 import LoadRepositoryView from './views/LoadRepositoryView';
 import TrucksView from './views/TrucksView';
 import TrailersView from './views/TrailersView';
@@ -19,7 +18,7 @@ import FinancialsView, { type FinPage } from './views/FinancialsView';
 import { loadDrivers } from './data/driversStore';
 import { loadFleet } from './data/fleetStore';
 import { ROUTES } from './data/fleet';
-import { canManageRoles } from './data/permStore';
+import { canManageRoles, canSeeFinancials } from './data/permStore';
 import { onChange } from './data/bus';
 import { watchForUpdate } from './data/versionCheck';
 import { startOdometerSync } from './data/fleetioSync';
@@ -30,14 +29,14 @@ import { startOdometerSync } from './data/fleetioSync';
    kept minimal, and driver / team / route look-ups are separate filters below
    the header (not one catch-all search box). */
 
-const APP_VERSION = '0.22.0';
+const APP_VERSION = '0.23.0';
 
-type Tab = 'matrix' | 'optimizer' | 'otp' | 'covered' | 'repo' | 'fleet' | 'fleet-map' | 'fleet-oos'
+type Tab = 'matrix' | 'optimizer' | 'otp' | 'covered' | 'repo' | 'fleet' | 'fleet-map'
   | 'trucks' | 'trailers' | 'loads' | 'drivers' | 'roles'
   | 'fin-cpm' | 'fin-customer' | 'fin-truck' | 'fin-miles' | 'integrations';
 
 interface NavItem { key: Tab; label: string; managerOnly?: boolean; sub?: string }
-const NAV_GROUPS: { title: string; items: NavItem[] }[] = [
+const NAV_GROUPS: { title: string; items: NavItem[]; restricted?: boolean }[] = [
   { title: 'Dispatch', items: [
     { key: 'matrix', label: '🗓 Asset Matrix' },
     { key: 'optimizer', label: '⚡ Route Optimizer' },
@@ -54,15 +53,14 @@ const NAV_GROUPS: { title: string; items: NavItem[] }[] = [
     { key: 'trailers', label: '🚟 Trailers' },
     { key: 'loads', label: '📦 Loads' },
     { key: 'fleet-map', label: '🗺 Fleet Map' },
-    { key: 'fleet-oos', label: '🛠 Out of Service' },
   ] },
-  { title: 'Financials', items: [
+  { title: 'Financials', restricted: true, items: [
     { key: 'fin-cpm', label: '💰 Revenue / CPM' },
     { key: 'fin-customer', label: '🏷 By Customer', sub: 'Reports' },
     { key: 'fin-truck', label: '🚚 By Truck / Team' },
     { key: 'fin-miles', label: '🛣 Driver Miles' },
   ] },
-  { title: 'Setup', items: [
+  { title: 'Setup', restricted: true, items: [
     { key: 'roles', label: '🔑 Roles', managerOnly: true },
     { key: 'integrations', label: '🔌 Integrations' },
   ] },
@@ -143,8 +141,13 @@ export default function App() {
   }, []);
 
   const showRoles = canManageRoles();
+  const seeFin = canSeeFinancials();   // Financials + Setup: Owner / US Ops only
+  const RESTRICTED_TABS: Tab[] = ['fin-cpm', 'fin-customer', 'fin-truck', 'fin-miles', 'roles', 'integrations'];
   /* if the current tab just became hidden (role changed), fall back to the matrix */
-  useEffect(() => { if (tab === 'roles' && !showRoles) setTab('matrix'); }, [tab, showRoles]);
+  useEffect(() => {
+    if (tab === 'roles' && !showRoles) setTab('matrix');
+    if (!seeFin && RESTRICTED_TABS.includes(tab)) setTab('matrix');
+  }, [tab, showRoles, seeFin]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const onMobile = () => typeof window !== 'undefined' && window.innerWidth <= 820;
   function go(t: Tab) { setTab(t); if (onMobile()) setSidebarOpen(false); }
@@ -220,6 +223,7 @@ export default function App() {
         <aside className="asset-sidebar">
           <nav className="asset-nav">
             {NAV_GROUPS.map((g) => {
+              if (g.restricted && !seeFin) return null;
               const items = g.items.filter((it) => !it.managerOnly || showRoles);
               if (!items.length) return null;
               const open = navOpen[g.title] ?? true;
@@ -253,7 +257,6 @@ export default function App() {
           {tab === 'trailers' && <TrailersView />}
           {tab === 'loads' && <LoadsView />}
           {tab === 'fleet-map' && <FleetMapView />}
-          {tab === 'fleet-oos' && <OutOfServiceView />}
           {tab === 'drivers' && <DriversView seed={seedDrivers} />}
           {tab === 'roles' && showRoles && <RolesView />}
           {tab === 'integrations' && <SettingsView />}
