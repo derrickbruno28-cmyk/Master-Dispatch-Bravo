@@ -116,7 +116,7 @@ export default function FleetStatusView({ seed }: { seed?: { q: string; nonce: n
       <div className="am-scroll">
         <table className="am-grid am-fleet">
           <thead>
-            <tr><th>Tractor</th><th>Drivers (constraints)</th><th>Type</th><th>Home terminal</th><th>Current</th><th>Hrs</th><th>Status</th><th>Team / route notes</th><th></th></tr>
+            <tr><th>Tractor</th><th>Drivers (constraints)</th><th>Type</th><th>Home terminal</th><th>Current</th><th>Status</th><th>Team / route notes</th><th></th></tr>
           </thead>
           <tbody>
             {rows.map((t) => (
@@ -132,7 +132,6 @@ export default function FleetStatusView({ seed }: { seed?: { q: string; nonce: n
                 <td className="am-muted">{t.type}</td>
                 <td>{TERMINAL_LABELS[t.homeCity] ?? t.homeCity}</td>
                 <td className="am-muted">{t.currentCity}</td>
-                <td style={{ color: t.hoursAvail === 0 ? 'var(--red)' : t.hoursAvail < 20 ? 'var(--amber)' : 'var(--green)' }}>{t.hoursAvail}</td>
                 <td>{(() => {
                   const cal = currentLoadStatus(t.tractor, assign);
                   if (cal) return (
@@ -224,7 +223,6 @@ function TruckEditor({ truck, isNew, onSave, onCancel }: { truck: FleetTruck; is
           <L t="Type"><OptSelect kind="type" value={t.type} onChange={(v) => f('type', v)} /></L>
           <L t="Home terminal"><OptSelect kind="terminal" value={t.homeCity} onChange={(v) => f('homeCity', v)} /></L>
           <L t="Current city (empty / standby location)"><input className="am-input" value={t.currentCity} onChange={(e) => f('currentCity', e.target.value.toUpperCase())} /></L>
-          <L t="Hours available"><input className="am-input" type="number" value={t.hoursAvail} onChange={(e) => f('hoursAvail', Number(e.target.value))} /></L>
           <L t="Availability (NTB = needs load · Deadhead · Shutdown blocks dispatch). Operational status — At Shipper, En Route, Delivered — now comes from the load on the calendar."><OptSelect kind="status" value={t.status} onChange={(v) => f('status', v)} /></L>
           {t.status.trim().toLowerCase() === 'deadhead' && (
             <L t="Deadhead to (hub / city — feeds the Route Optimizer's next-load launch point)">

@@ -1,8 +1,14 @@
 import { useEffect, useMemo, useState } from 'react';
 import { loadFleet, saveTruck, teamStatusMeta, type FleetTruck } from '../data/fleetStore';
-import { getMatches, parseRoute, tripCode, type Match } from '../data/optimize';
+import { getMatches, parseRoute, tripCode, isTeamTrip, SOLO_MAX_MILES, type Match } from '../data/optimize';
 import { setAssignment, isoDate, loadAssignments, parseCellKey, driverConflicts } from '../data/schedule';
+import { canApproveSoloOverride } from '../data/permStore';
 import { onChange } from '../data/bus';
+
+/* a SOLO driver = a truck with only one driver (no driver2). Solo drivers may run
+   solo trips (≤ SOLO_MAX_MILES loaded miles) only; a team trip / anything longer
+   needs an FMT Lead or US Ops approval before it can be assigned to them. */
+function isSoloTruck(t: FleetTruck | undefined): boolean { return !!t && !(t.driver2 || '').trim(); }
 
 /* Route Optimizer — plan a team's NEXT load. The suggestions come from where the
    team will END UP (the destination of their current trip, or the hub they're
@@ -27,10 +33,11 @@ export default function RouteOptimizerView() {
   const [pending, setPending] = useState<string>('');   // route awaiting an "assign anyway"
   const [conflictMsg, setConflictMsg] = useState('');
   const [endsAt, setEndsAt] = useState('');   // editable launch point (next-load origin)
-  const [hos, setHos] = useState<number>(0);   // editable HOS hours (manual until Samsara)
+  const [hos, setHos] = useState<number>(0);   // team collective HOS hours (manual until Samsara)
+  const [canApprove, setCanApprove] = useState<boolean>(() => canApproveSoloOverride());
 
   /* live sync with the Fleet card / Matrix */
-  useEffect(() => onChange(() => { setFleet(loadFleet()); setAssignments(loadAssignments()); }), []);
+  useEffect(() => onChange(() => { setFleet(loadFleet()); setAssignments(loadAssignments()); setCanApprove(canApproveSoloOverride()); }), []);
 
   /* the team's CURRENT trip — soonest-dated matrix assignment, else the fleet
      card's currentRoute. Its destination is where they'll finish. */
@@ -77,14 +84,16 @@ export default function RouteOptimizerView() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tractor, truck?.hoursAvail]);
 
+  const solo = isSoloTruck(truck);
+
   const matches = useMemo<Match[]>(() => {
     if (!truck) return [];
     const eff = { ...truck, hoursAvail: hos } as FleetTruck;
-    const m = getMatches(eff, radius, endsAt || autoLaunch.name);
+    const m = getMatches(eff, radius, endsAt || autoLaunch.name, solo);   // solo → solo trips only (≤550 mi)
     m.sort((a, b) => (homeward ? b.hw - a.hw || a.dh - b.dh : a.dh - b.dh || b.hw - a.hw));
     return m;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [truck, radius, homeward, endsAt, hos]);
+  }, [truck, radius, homeward, endsAt, hos, solo]);
 
   function saveHos(v: number) {
     setHos(v);
@@ -101,6 +110,21 @@ export default function RouteOptimizerView() {
   }
   function assign(m: Match) {
     if (!truck) return;
+    /* solo driver → team trip / over 550 mi: blocked unless an FMT Lead or US Ops
+       is signed in, and even then it takes a deliberate "Approve & assign" click */
+    if (isSoloTruck(truck) && isTeamTrip(m)) {
+      if (!canApprove) {
+        setConflictMsg(`⛔ #${truck.tractor} is a SOLO driver — ${m.miles} mi is a TEAM trip (over ${SOLO_MAX_MILES} mi). An FMT Lead or US Ops must approve before this can be assigned.`);
+        setPending(''); setNote('');
+        return;
+      }
+      if (pending !== m.route) {
+        setPending(m.route);
+        setConflictMsg(`⚠ Solo driver on a TEAM trip (${m.miles} mi > ${SOLO_MAX_MILES}). You have approval rights — click “Approve & assign” to override.`);
+        setNote('');
+        return;
+      }
+    }
     const conflicts = driverConflicts(truck.tractor, assignDate, loadAssignments(), fleet);
     if (conflicts.length && pending !== m.route) {
       setPending(m.route);
@@ -163,6 +187,7 @@ export default function RouteOptimizerView() {
               <div className="opt-controls">
                 <div className="opt-selected">
                   <b>#{truck.tractor}</b>
+                  <span className={`opt-crew ${solo ? 'solo' : 'team'}`} title={solo ? `Solo driver — solo trips only (≤ ${SOLO_MAX_MILES} mi) unless an FMT Lead / US Ops approves a team trip` : 'Team — all routes (solo + team)'}>{solo ? '👤 Solo' : '👥 Team'}</span>
                   {autoLaunch.why === 'deadhead'
                     ? <span className="opt-sel-cur"> · deadheading to <b>{autoLaunch.name}</b> — best loads picking up near there ↓</span>
                     : curRoute && autoLaunch.why === 'route'
@@ -175,11 +200,14 @@ export default function RouteOptimizerView() {
                   <label className="opt-field"><span className="am-muted">Ends at (next-load origin)</span>
                     <input className="am-input" value={endsAt} onChange={(e) => setEndsAt(e.target.value.toUpperCase())} placeholder="e.g. IRVING TX" />
                   </label>
-                  <label className="opt-field"><span className="am-muted">HOS hrs (manual)</span>
-                    <input className="am-input" type="number" min={0} max={99} value={hos}
+                  <label className="opt-field"><span className="am-muted">Collective HOS (hrs) — drives “Fits HOS” →</span>
+                    <input className="am-input" type="number" min={0} max={999} value={hos}
+                      title="The team's collective hours of service — the sum of both drivers' weekly cycles. Manual until Samsara is connected."
                       onChange={(e) => setHos(Number(e.target.value))} onBlur={(e) => saveHos(Number(e.target.value))} />
+                    <span className="am-muted" style={{ fontSize: 10.5 }}>sum of both drivers' weekly cycles</span>
                   </label>
                 </div>
+                {solo && <div className="opt-solo-note">👤 Solo driver — showing <b>solo trips only</b> (≤ {SOLO_MAX_MILES} mi loaded). Team trips need an FMT Lead / US Ops approval.</div>}
 
                 <div className="opt-radius">
                   <span className="am-muted">Pickup within</span>
@@ -218,8 +246,10 @@ export default function RouteOptimizerView() {
                           <td>{m.miles}</td>
                           <td>{m.hrs}h</td>
                           <td>{m.hw > 0 ? <span className="opt-hw"><span className="opt-hw-bar" style={{ width: `${m.hw}%` }} />{m.hw}%</span> : <span className="am-muted">—</span>}</td>
-                          <td>{m.ok ? <span style={{ color: 'var(--green)' }}>✓</span> : <span style={{ color: 'var(--red)' }}>over</span>}</td>
-                          <td><button className={pending === m.route ? 'opt-assign opt-assign-warn' : 'opt-assign'} onClick={() => assign(m)}>{pending === m.route ? 'Assign anyway' : 'Assign →'}</button></td>
+                          <td>{m.ok
+                            ? <span style={{ color: 'var(--green)' }} title={`${hos}h collective − ${m.hrs}h needed`}>✓ fits<span className="am-muted"> · {Math.round((hos - m.hrs) * 10) / 10}h left</span></span>
+                            : <span style={{ color: 'var(--red)' }} title={`${m.hrs}h needed − ${hos}h collective`}>over by {Math.round((m.hrs - hos) * 10) / 10}h</span>}</td>
+                          <td><button className={pending === m.route ? 'opt-assign opt-assign-warn' : 'opt-assign'} onClick={() => assign(m)}>{pending === m.route ? (solo && isTeamTrip(m) ? 'Approve & assign' : 'Assign anyway') : 'Assign →'}</button></td>
                         </tr>
                       ))}
                     </tbody>

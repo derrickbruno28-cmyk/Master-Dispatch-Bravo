@@ -62,7 +62,16 @@ export function parseRoute(r: string): ParsedRoute {
   };
 }
 
-function milesNum(m: string): number { return parseInt(m, 10) || 0; }
+/* leading loaded-mile count — strips thousands commas ("1,253.4" → 1253) so
+   comma-formatted long hauls don't collapse to a single mile. */
+function milesNum(m: string): number { return parseInt((m || '').replace(/,/g, ''), 10) || 0; }
+
+/* SOLO vs TEAM trip cutoff: a route up to this many loaded miles is a SOLO trip
+   (a solo driver may run it); anything longer is a TEAM trip. Solo drivers can't
+   be assigned a team trip without an FMT Lead / US Ops approval. */
+export const SOLO_MAX_MILES = 550;
+export function routeLoadedMiles(r: { miles: string }): number { return milesNum(r.miles); }
+export function isTeamTrip(r: { miles: string }): boolean { return milesNum(r.miles) > SOLO_MAX_MILES; }
 
 export interface Match extends AssetRoute, ParsedRoute {
   dh: number;   // deadhead road miles (great-circle × 1.25)
@@ -75,13 +84,14 @@ export interface Match extends AssetRoute, ParsedRoute {
    `fromCity` overrides the start point — pass the destination of the truck's
    CURRENT route so the suggestions are the best NEXT loads out of where the
    team will actually be once they finish. Defaults to the truck's current city. */
-export function getMatches(d: Truck, radius: number, fromCity?: string): Match[] {
+export function getMatches(d: Truck, radius: number, fromCity?: string, soloOnly = false): Match[] {
   const start = (fromCity && fromCity.trim()) || d.currentCity;
   const dc = findCC(start);
   if (!dc) return [];
   const hc = findCC(d.homeCity);
   const out: Match[] = [];
   for (const r of ROUTES) {
+    if (soloOnly && isTeamTrip(r)) continue;   // solo drivers only see solo trips (≤ SOLO_MAX_MILES)
     const p = parseRoute(r.route);
     if (!p.origin) continue;
     const dhRoad = hd(dc.lat, dc.lng, p.origin.lat, p.origin.lng) * 1.25;
@@ -102,10 +112,10 @@ export function getMatches(d: Truck, radius: number, fromCity?: string): Match[]
    where a team FINISHES their current trip, gated by their remaining HOS. Fits-
    in-hours suggestions first, then shortest deadhead, then most homeward. HOS is
    read from the Samsara adapter by the caller and passed in here. */
-export function nextRouteSuggestions(fromCity: string, homeCity: string, hosHours: number, radius = 600, n = 5): Match[] {
+export function nextRouteSuggestions(fromCity: string, homeCity: string, hosHours: number, radius = 600, n = 5, soloOnly = false): Match[] {
   if (!fromCity || !findCC(fromCity)) return [];
   const synth = { currentCity: fromCity, homeCity, hoursAvail: hosHours } as Truck;
-  return getMatches(synth, radius, fromCity)
+  return getMatches(synth, radius, fromCity, soloOnly)
     .sort((a, b) => (Number(b.ok) - Number(a.ok)) || (a.dh - b.dh) || (b.hw - a.hw))
     .slice(0, n);
 }

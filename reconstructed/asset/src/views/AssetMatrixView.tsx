@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, type CSSProperties } from 'react';
 import { TERMINALS, TERMINAL_LABELS } from '../data/fleet';
 import { loadFleet, saveTruck, removeTruck, teamStatusMeta, isShutdown, blankTruck, TRUCK_TYPES, type FleetTruck } from '../data/fleetStore';
 import { loadDrivers, driverNames } from '../data/driversStore';
@@ -7,13 +7,13 @@ import {
   loadAssignments, setAssignment, moveAssignment, ensureSeed, cellKey, parseCellKey,
   isoDate, mondayOf, addDays, driverConflicts, type Assignment,
 } from '../data/schedule';
-import { canDelete } from '../data/permStore';
+import { canDelete, canApproveSoloOverride } from '../data/permStore';
 import LoadDetailModal from './LoadDetailModal';
 import { loadAll, moveLoadCell, clearLoadCell, type Load } from '../data/loadsStore';
 import { documentStore } from '../integrations/documents';
 import { fleetioClient, localOosList } from '../integrations/telematics';
 import { samsara } from '../integrations/samsara';
-import { nextRouteSuggestions, parseRoute, tripCode, type Match } from '../data/optimize';
+import { nextRouteSuggestions, parseRoute, tripCode, isTeamTrip, SOLO_MAX_MILES, type Match } from '../data/optimize';
 
 /* Asset Matrix — the scheduling board for our OWN trucks.
    Rows = trucks grouped by home terminal (SA / Dallas / Memphis / Houston),
@@ -467,7 +467,7 @@ function TerminalRows({ term, trucks, dates, assign, setEditing, openDispatch, l
                 {a ? (
                   <div
                     className="am-assign"
-                    style={{ borderLeftColor: STATUS_COLOR[a.status] }}
+                    style={{ borderLeftColor: STATUS_COLOR[a.status], '--sc': STATUS_COLOR[a.status] } as CSSProperties}
                     draggable
                     onDragStart={(e) => { e.stopPropagation(); e.dataTransfer.setData('text/plain', k); }}
                     onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); if (!canDel) { flash('🔒 Deleting a load is restricted — unlock delete access in the header.'); return; } setConfirmClear(k); }}
@@ -508,7 +508,8 @@ function TerminalRows({ term, trucks, dates, assign, setEditing, openDispatch, l
                   const fromCity = dest?.name || '';
                   if (!fromCity) return <span className="am-add">+</span>;
                   const hos = hosByTruck[t.tractor] ?? t.hoursAvail ?? 0;
-                  const sugs = nextRouteSuggestions(fromCity, t.homeCity, hos, 600, 5);
+                  const soloTruck = !(t.driver2 || '').trim();   // solo → solo trips only (≤550 mi)
+                  const sugs = nextRouteSuggestions(fromCity, t.homeCity, hos, 600, 5, soloTruck);
                   if (sugs.length === 0) return <span className="am-add">+</span>;
                   const open = sugCell === k;
                   return (
@@ -523,7 +524,14 @@ function TerminalRows({ term, trucks, dates, assign, setEditing, openDispatch, l
                           {sugs.map((s: Match, i: number) => (
                             <button key={i} className={`am-suggest-item ${s.ok ? '' : 'over'}`}
                               title={s.ok ? 'Fits remaining hours — click to assign' : 'Exceeds remaining HOS — click to assign anyway'}
-                              onClick={(e) => { e.stopPropagation(); save(k, { route: s.route, status: 'covered', usps: /fa\w+|hcr/i.test(s.route) }); setSugCell(null); }}>
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                if (soloTruck && isTeamTrip(s) && !canApproveSoloOverride()) {
+                                  flash(`⛔ #${t.tractor} is a SOLO driver — that's a TEAM trip (over ${SOLO_MAX_MILES} mi). An FMT Lead or US Ops must approve it.`);
+                                  return;
+                                }
+                                save(k, { route: s.route, status: 'covered', usps: /fa\w+|hcr/i.test(s.route) }); setSugCell(null);
+                              }}>
                               <span className="am-suggest-rank">{i + 1}</span>
                               <span className="am-suggest-main">
                                 <span className="am-suggest-route">{tripCode(s.route) || s.route}</span>

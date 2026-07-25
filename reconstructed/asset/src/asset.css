@@ -146,7 +146,16 @@
 .am-cell:hover { background: rgba(91,141,239,0.05); }
 .am-add { color: var(--border); font-size: 15px; }
 .am-cell:hover .am-add { color: var(--accent); }
-.am-assign { border-left: 3px solid var(--muted); padding: 3px 6px; border-radius: 3px; background: var(--cell-bg, rgba(255,255,255,0.02)); }
+/* Soft Tint (UI iteration C): a calm ~12% status-color wash on a rounded cell
+   with a 4px left accent. --sc = the load's status color, set inline per cell. */
+.am-assign {
+  --sc: var(--muted);
+  border: 1px solid color-mix(in srgb, var(--sc) 30%, var(--border));
+  border-left: 4px solid var(--sc);
+  padding: 6px 9px;
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--sc) 12%, var(--panel));
+}
 .am-route { font-weight: 600; font-size: 11.5px; }
 .am-status { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.3px; }
 
@@ -368,6 +377,11 @@
 .opt-field { display: flex; flex-direction: column; gap: 2px; }
 .opt-field .am-input { min-width: 150px; }
 .opt-field span { font-size: 10px; text-transform: uppercase; letter-spacing: 0.4px; }
+.opt-field span.am-muted { text-transform: none; letter-spacing: 0; }
+.opt-crew { display: inline-block; margin-left: 8px; font-size: 11px; font-weight: 800; padding: 1px 8px; border-radius: 999px; vertical-align: middle; }
+.opt-crew.solo { color: #7a5cff; background: color-mix(in srgb, #7a5cff 14%, var(--panel)); border: 1px solid color-mix(in srgb, #7a5cff 40%, var(--border)); }
+.opt-crew.team { color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, var(--panel)); border: 1px solid color-mix(in srgb, var(--accent) 40%, var(--border)); }
+.opt-solo-note { margin-top: 8px; font-size: 11.5px; color: var(--text); background: color-mix(in srgb, #7a5cff 10%, var(--panel)); border: 1px solid color-mix(in srgb, #7a5cff 32%, var(--border)); border-radius: 8px; padding: 6px 10px; line-height: 1.4; }
 .opt-controls-row2 { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
 .opt-truck-badges { display: inline-flex; align-items: center; gap: 7px; }
 .opt-tstatus { font-size: 9.5px; font-weight: 800; letter-spacing: 0.2px; }

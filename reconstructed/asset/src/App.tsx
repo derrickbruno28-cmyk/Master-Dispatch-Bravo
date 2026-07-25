@@ -29,7 +29,7 @@ import { startOdometerSync } from './data/fleetioSync';
    kept minimal, and driver / team / route look-ups are separate filters below
    the header (not one catch-all search box). */
 
-const APP_VERSION = '0.23.0';
+const APP_VERSION = '0.24.0';
 
 type Tab = 'matrix' | 'optimizer' | 'otp' | 'covered' | 'repo' | 'fleet' | 'fleet-map'
   | 'trucks' | 'trailers' | 'loads' | 'drivers' | 'roles'

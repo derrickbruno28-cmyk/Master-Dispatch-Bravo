@@ -107,6 +107,9 @@ export function canDelete(): boolean { const r = currentRole(); return r === 'ow
 export function canEdit(): boolean { return currentRole() !== ''; }
 /* Financials + Setup are hidden from FMT Lead and FMT — visible to Owner + US Ops only */
 export function canSeeFinancials(): boolean { const r = currentRole(); return r === 'owner' || r === 'us_ops'; }
+/* approve a solo driver onto a TEAM trip or any trip over 550 miles — FMT Lead,
+   US Ops, or the Owner only (a plain FMT can never override the solo limit) */
+export function canApproveSoloOverride(): boolean { const r = currentRole(); return r === 'owner' || r === 'fmt_lead' || r === 'us_ops'; }
 
 /* ---- role managers: who can see the Roles tab + assign roles (owner-controlled) ---- */
 function readRoleManagers(): string[] {
