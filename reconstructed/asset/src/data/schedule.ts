@@ -27,7 +27,7 @@ export function isoDate(d: Date) { return d.toISOString().slice(0, 10); }
 export function mondayOf(d: Date) { const x = new Date(d); const dow = (x.getDay() + 6) % 7; x.setDate(x.getDate() - dow); return x; }
 export function addDays(d: Date, n: number) { const x = new Date(d); x.setDate(x.getDate() + n); return x; }
 
-const LS_KEY = 'asset-matrix-v1';
+const LS_KEY = 'asset-matrix-v2';   // v2 = demo calendar starts blank (no seeded loads)
 const COL = 'assetSchedule';   // shared Firestore collection (one doc per cell)
 
 function readLocal(): Record<string, Assignment> {
@@ -57,17 +57,12 @@ export function startScheduleSync() {
 }
 if (firebaseEnabled) startScheduleSync();
 
-/* Demo seed so the board isn't empty on first run. */
+/* The demo calendar starts BLANK — no seeded loads. (The old seed put demo
+   routes on truck numbers that now collide with the real Fleetio roster, which
+   showed up as "stuck" loads on Team Status.) Loads appear only as they're
+   assigned on the matrix. */
 function seed(): Record<string, Assignment> {
-  const out: Record<string, Assignment> = {};
-  const mon = mondayOf(new Date());
-  const put = (tractor: string, dayIdx: number, a: Assignment) => { out[cellKey(tractor, isoDate(addDays(mon, dayIdx)))] = a; };
-  put('447', 0, { route: 'FA2D3-1 Coppell→Memphis', status: 'dispatched', usps: true });
-  put('456', 1, { route: 'FA2D3-544 Irving→SATX', status: 'covered', usps: true });
-  put('758', 2, { route: '16193 Opa-Irv', status: 'departed', usps: false });
-  put('958', 0, { route: 'FA2D3-354 Memphis→Nashville', status: 'covered', usps: true });
-  put('444', 3, { route: '34hr reset — Houston', status: 'off', usps: false });
-  return out;
+  return {};
 }
 
 /* Persist the seed once so all views (Matrix, Covered) see the same demo data.

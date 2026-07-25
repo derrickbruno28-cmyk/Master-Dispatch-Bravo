@@ -119,9 +119,14 @@ export default function FleetStatusView({ seed }: { seed?: { q: string; nonce: n
             <tr><th>Tractor</th><th>Drivers (constraints)</th><th>Type</th><th>Home terminal</th><th>Current</th><th>Status</th><th>Team / route notes</th><th></th></tr>
           </thead>
           <tbody>
-            {rows.map((t) => (
-              <tr key={t.tractor} className={isShutdown(t.status) ? 'fleet-shutdown' : ''}>
-                <td className="am-tractor">#{t.tractor} <span className="am-rating">{t.rating}</span></td>
+            {rows.map((t) => {
+              /* an unassigned truck (no drivers yet) shows JUST the tractor — type,
+                 home terminal, current city, status and notes stay blank until a
+                 crew is built on it. */
+              const crew = !!(t.driver1 || '').trim() || !!(t.driver2 || '').trim();
+              return (
+              <tr key={t.tractor} className={crew && isShutdown(t.status) ? 'fleet-shutdown' : ''}>
+                <td className="am-tractor">#{t.tractor} {crew && <span className="am-rating">{t.rating}</span>}</td>
                 <td>
                   {[t.driver1, t.driver2].filter(Boolean).map((n, i) => <span key={i}>{i > 0 && ' · '}{withConstraint(n)}</span>)}
                   {!t.driver1 && !t.driver2 && <span className="am-muted">—</span>}
@@ -129,10 +134,10 @@ export default function FleetStatusView({ seed }: { seed?: { q: string; nonce: n
                     ? <div className="fleet-pickup" title={`Cross-city meet — driver 1 swings through ${x.c2} to grab driver 2`}>🔀 {t.driver1.split(' ')[0]} ({x.c1}) picks up {t.driver2.split(' ')[0]} ({x.c2})</div>
                     : null; })()}
                 </td>
-                <td className="am-muted">{t.type}</td>
-                <td>{TERMINAL_LABELS[t.homeCity] ?? t.homeCity}</td>
-                <td className="am-muted">{t.currentCity}</td>
-                <td>{(() => {
+                <td className="am-muted">{crew ? t.type : ''}</td>
+                <td>{crew ? (TERMINAL_LABELS[t.homeCity] ?? t.homeCity) : ''}</td>
+                <td className="am-muted">{crew ? t.currentCity : ''}</td>
+                <td>{!crew ? '' : (() => {
                   const cal = currentLoadStatus(t.tractor, assign);
                   if (cal) return (
                     <span className="am-pill" style={{ color: calColor(cal.status) }}
@@ -142,7 +147,7 @@ export default function FleetStatusView({ seed }: { seed?: { q: string; nonce: n
                   );
                   return <span className="am-pill" style={{ color: teamStatusMeta(t.status).color }} title="Availability status — no active (non-completed) load on the calendar">{teamStatusMeta(t.status).label}</span>;
                 })()}</td>
-                <td className="fleet-constraints">{t.constraints || <span className="am-muted">—</span>}</td>
+                <td className="fleet-constraints">{crew ? (t.constraints || <span className="am-muted">—</span>) : ''}</td>
                 <td className="fleet-actions">
                   {confirmDel === t.tractor ? (
                     <>
@@ -160,7 +165,8 @@ export default function FleetStatusView({ seed }: { seed?: { q: string; nonce: n
                   )}
                 </td>
               </tr>
-            ))}
+              );
+            })}
           </tbody>
         </table>
       </div>

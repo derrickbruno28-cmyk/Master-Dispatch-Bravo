@@ -25,7 +25,12 @@ export async function importFromFleetio(): Promise<ImportResult> {
       saveTruck({ ...existing, odometer: u.odometer, odoAt: now, make: u.make || existing.make });
       updated++;
     } else {
-      const t: FleetTruck = { ...blankTruck(), tractor: u.truck, odometer: u.odometer, odoAt: now, make: u.make, unitRating: '' };
+      /* new unit → bare profile: just the tractor + make. Type, home terminal,
+         current city, and status stay BLANK until a crew is assigned. */
+      const t: FleetTruck = {
+        ...blankTruck(), tractor: u.truck, odometer: u.odometer, odoAt: now, make: u.make,
+        unitRating: '', type: '', currentCity: '', homeCity: '', status: '', constraints: '',
+      };
       saveTruck(t);
       created++;
     }

@@ -29,15 +29,15 @@ export const TRUCKS: Truck[] = FLEETIO_UNITS.map((u) => ({
   tractor: u.tractor,
   rating: '',
   driver1: '', driver2: '',
-  type: 'OTR Team',
-  currentCity: 'DALLAS', homeCity: 'DALLAS',
+  type: '',
+  currentCity: '', homeCity: '',
   returnDate: '',
   hoursAvail: 70,
-  status: 'NTB',
+  status: '',
   currentRoute: '',
   make: u.make,
   odometer: u.odometer,
-  constraints: u.group,
+  constraints: '',
 }));
 
 export const ROUTES: AssetRoute[] = ROUTE_SEED;

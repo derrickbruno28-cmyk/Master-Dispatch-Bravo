@@ -82,6 +82,7 @@ export default function TrucksView() {
             {rows.length === 0 && <tr><td colSpan={7} className="am-muted" style={{ textAlign: 'center', padding: 16 }}>No trucks.</td></tr>}
             {rows.map((t) => {
               const oos = svc[t.tractor] === 'out_of_service';
+              const crew = !!(t.driver1 || '').trim() || !!(t.driver2 || '').trim();
               return (
               <tr key={t.tractor} className={oos ? 'fleet-shutdown' : ''}>
                 <td className="am-tractor">#{t.tractor}{oos && <span className="oos-tag" title="Out of service (Fleetio / marked here) — blocked from the Asset Matrix">OOS</span>}</td>
@@ -96,8 +97,8 @@ export default function TrucksView() {
                       : !oos && <button className="am-clear svc-toggle" title="Mark this unit out of service (blocks matrix assignment)" onClick={() => toggleService(t.tractor, true)}>⛔ Mark OOS</button>}
                   </div>
                 </td>
-                <td className="am-muted">{t.type}</td>
-                <td>{TERMINAL_LABELS[t.homeCity] ?? t.homeCity}</td>
+                <td className="am-muted">{crew ? t.type : ''}</td>
+                <td>{crew ? (TERMINAL_LABELS[t.homeCity] ?? t.homeCity) : ''}</td>
                 <td>{[t.driver1, t.driver2].filter(Boolean).join(' · ') || <span className="am-muted">unassigned</span>}</td>
                 <td className="fleet-actions">
                   {confirmDel === t.tractor ? (
