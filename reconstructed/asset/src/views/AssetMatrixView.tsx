@@ -151,13 +151,19 @@ export default function AssetMatrixView() {
     return ps.includes(posFilter);
   }
 
+  /* the calendar shows CREWS only — a truck is on the board once it has at least
+     one driver assigned (via ＋ Add Team or the Team Status editor). Freshly
+     imported units sit in the Trucks list, unassigned, until you build a crew,
+     so the board stays clean instead of listing every tractor. */
+  const hasCrew = (t: FleetTruck) => !!(t.driver1 || '').trim() || !!(t.driver2 || '').trim();
   const byTerminal = useMemo(() => {
     const m: Record<string, FleetTruck[]> = {};
     for (const term of TERMINALS) m[term] = [];
-    for (const t of fleet) { if (!matchesPos(t)) continue; (m[t.homeCity] ?? (m[t.homeCity] = [])).push(t); }
+    for (const t of fleet) { if (!hasCrew(t) || !matchesPos(t)) continue; (m[t.homeCity] ?? (m[t.homeCity] = [])).push(t); }
     return m;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fleet, posFilter, driverPos]);
+  const crewCount = useMemo(() => fleet.filter(hasCrew).length, [fleet]);
 
   const weekLabel = `${weekStart.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} – ${addDays(weekStart, 6).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}`;
 
@@ -242,7 +248,12 @@ export default function AssetMatrixView() {
             </tr>
           </thead>
           <tbody>
-            {shownTerminals.map((term) => (
+            {crewCount === 0 && (
+              <tr><td colSpan={DAYS.length + 1} className="am-empty-board">
+                No teams on the board yet. Your trucks are in the <b>Fleet ▸ Trucks</b> list — add a crew with <b>＋ Add Team</b> (or assign drivers on <b>Team Status</b>) and they’ll show up here.
+              </td></tr>
+            )}
+            {shownTerminals.filter((term) => (byTerminal[term]?.length ?? 0) > 0).map((term) => (
               <TerminalRows
                 key={term}
                 term={term}
@@ -313,31 +324,43 @@ export default function AssetMatrixView() {
    on the Asset Matrix immediately (the full editor lives on Team Status). */
 function AddTeamModal({ onClose, onAdded }: { onClose: () => void; onAdded: (tractor: string) => void }) {
   const roster = useMemo(() => driverNames(), []);
+  const truckNums = useMemo(() => loadFleet().map((x) => x.tractor).sort((a, b) => a.localeCompare(b, undefined, { numeric: true })), []);
   const [t, setT] = useState<FleetTruck>(() => blankTruck());
   const set = <K extends keyof FleetTruck>(k: K, v: FleetTruck[K]) => setT((p) => ({ ...p, [k]: v }));
+  const existing = useMemo(() => loadFleet().find((x) => x.tractor === t.tractor.trim()), [t.tractor]);
   function add() {
-    if (!t.tractor.trim()) return;
-    saveTruck({ ...t, tractor: t.tractor.trim() });
-    onAdded(t.tractor.trim());
+    const num = t.tractor.trim();
+    if (!num) return;
+    /* attach the crew to the existing (Fleetio-imported) unit — keep its
+       odometer / make / rating / service — else create a brand-new truck */
+    saveTruck(existing
+      ? { ...existing, driver1: t.driver1, driver2: t.driver2, type: t.type, homeCity: t.homeCity }
+      : { ...t, tractor: num });
+    onAdded(num);
   }
   return (
     <div className="fleet-modal-back" onClick={onClose}>
       <div className="fleet-modal" onClick={(e) => e.stopPropagation()}>
         <h3>👥 Add Team to the Board</h3>
-        <p className="am-muted" style={{ fontSize: 12.5, marginTop: -4 }}>Type the two drivers and the truck #, then Add. It shows up as a row on the matrix right away. Trailers are assigned per route inside each load (teams run power-only).</p>
+        <p className="am-muted" style={{ fontSize: 12.5, marginTop: -4 }}>Type the two drivers and pick the truck # from your fleet, then Add. It shows up as a row on the matrix right away (its odometer, make &amp; rating carry over from Fleetio). Trailers are assigned per route inside each load (teams run power-only).</p>
         <div className="fleet-form-grid">
           <label className="otp-field"><span className="otp-field-label">Driver 1</span>
             <input className="am-input" list="addteam-roster" value={t.driver1} onChange={(e) => set('driver1', e.target.value)} placeholder="type or pick a driver…" /></label>
           <label className="otp-field"><span className="otp-field-label">Driver 2 (leave blank for solo)</span>
             <input className="am-input" list="addteam-roster" value={t.driver2} onChange={(e) => set('driver2', e.target.value)} placeholder="type or pick a driver…" /></label>
-          <label className="otp-field"><span className="otp-field-label">Truck #</span>
-            <input className="am-input" value={t.tractor} onChange={(e) => set('tractor', e.target.value)} placeholder="e.g. 512" /></label>
+          <label className="otp-field"><span className="otp-field-label">Truck # (pick from your fleet)</span>
+            <input className="am-input" list="addteam-trucks" value={t.tractor} onChange={(e) => set('tractor', e.target.value)} placeholder="e.g. 442" />
+            {t.tractor.trim() && (existing
+              ? <span className="am-muted" style={{ fontSize: 10.5, color: 'var(--green)' }}>✓ #{existing.tractor} · {existing.make || 'make —'} · {existing.odometer ? existing.odometer.toLocaleString() + ' mi' : 'no odo'}</span>
+              : <span className="am-muted" style={{ fontSize: 10.5, color: 'var(--amber)' }}>new truck (not in Fleetio import)</span>)}
+          </label>
           <label className="otp-field"><span className="otp-field-label">Type</span>
             <select className="am-input" value={t.type} onChange={(e) => set('type', e.target.value)}>{TRUCK_TYPES.map((x) => <option key={x} value={x}>{x}</option>)}</select></label>
           <label className="otp-field"><span className="otp-field-label">Home terminal</span>
             <select className="am-input" value={t.homeCity} onChange={(e) => set('homeCity', e.target.value)}>{TERMINALS.map((x) => <option key={x} value={x}>{TERMINAL_LABELS[x] ?? x}</option>)}</select></label>
         </div>
         <datalist id="addteam-roster">{roster.map((n) => <option key={n} value={n} />)}</datalist>
+        <datalist id="addteam-trucks">{truckNums.map((n) => <option key={n} value={n} />)}</datalist>
         <div className="fleet-modal-btns">
           <button className="am-save" disabled={!t.tractor.trim()} onClick={add}>Add team</button>
           <button className="am-cancel" onClick={onClose}>Cancel</button>

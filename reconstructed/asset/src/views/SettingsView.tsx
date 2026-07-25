@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { samsaraOrgs, setSamsaraOrgKey, geofenceSourceId, setGeofenceSourceId, maskKey, samsaraStatus, samsara, type ConnStatus, type SamsaraOrg } from '../integrations/samsara';
 import { fleetioClient } from '../integrations/telematics';
+import { FLEETIO_UNITS } from '../data/fleetUnits';
 import { maptilerKey, setMaptilerKey, maptilerMasked } from '../integrations/mapstyle';
 import { onChange, emitChange } from '../data/bus';
 import { firebaseEnabled } from '../firebase';
@@ -180,16 +181,29 @@ export default function SettingsView() {
         </div>
       </div>
 
-      {/* Fleetio (already wired as a mock in Phase 3) */}
+      {/* Fleetio — fleet loaded from the export; live auto-sync needs the connector */}
       <div className="intg-card">
         <div className="intg-card-head">
           <div className="intg-card-title">
-            <span className="intg-status-dot" style={{ background: 'var(--amber)' }} />
-            🛠 Fleetio <span className="intg-card-sub">Mock · backend pending</span>
+            <span className="intg-status-dot" style={{ background: 'var(--green)' }} />
+            🛠 Fleetio <span className="intg-card-sub">Fleet loaded · live auto-sync pending</span>
           </div>
           <span className="intg-badge">{flt.label}</span>
         </div>
-        <p className="am-muted" style={{ fontSize: 12 }}>Maintenance / out-of-service status. Drives the Out of Service board and the matrix row-lock. Runs on mock data until a Fleetio token is added.</p>
+        <p className="am-muted" style={{ fontSize: 12.5, maxWidth: 760 }}>
+          Your <b>{FLEETIO_UNITS.length} trucks</b> are loaded straight from the Fleetio vehicle export (odometer, make, and in/out-of-service),
+          so the Trucks list, Out-of-Service board, and matrix row-lock all run on your real fleet right now.
+        </p>
+        <div className="intg-feature-grid">
+          <IntgFeature icon="📇" title="Truck roster" desc="Every Fleetio unit is a truck profile — imported unrated, rate them manually." />
+          <IntgFeature icon="🛞" title="Odometer & make" desc="Per-unit odometer + make from the export — drives the A→D rating you set." />
+          <IntgFeature icon="⛔" title="In / out of service" desc="Out-of-service & in-shop units are blocked from matrix assignment." />
+        </div>
+        <div className="intg-mock-note">
+          <b>To go fully live</b> (hourly auto-refresh from Fleetio's API): Fleetio can't be called safely from the browser, so it needs a small
+          <b> read-only backend connector</b> that holds your API token as a server secret. Get a read-only <b>API token</b> + <b>Account token</b> from
+          Fleetio → <b>Account Settings → Fleetio API Keys</b>, then the connector syncs odometers &amp; status on a schedule. Ask to have it built.
+        </div>
       </div>
     </div>
   );
