@@ -11,7 +11,7 @@
      with the Firebase web config); the code path below is ready for it. */
 
 import { db, firebaseEnabled } from '../firebase';
-import { collection, deleteDoc, doc, onSnapshot, query, setDoc, where } from 'firebase/firestore';
+import { collection, deleteDoc, doc, getDocs, onSnapshot, query, setDoc, where } from 'firebase/firestore';
 import { emitChange } from './bus';
 
 export interface Assignment { route: string; status: string; usps: boolean }
@@ -73,6 +73,21 @@ export function ensureSeed() {
 }
 
 export function loadAssignments(): Record<string, Assignment> { return cache; }
+
+/* wipe EVERY calendar cell — clears the shared board (live: deletes all
+   assetSchedule docs; demo: clears the local copy). Owner-triggered reset. */
+export async function clearAllAssignments(): Promise<number> {
+  if (firebaseEnabled && db) {
+    const database = db;
+    const snap = await getDocs(collection(database, COL));
+    await Promise.all(snap.docs.map((d) => deleteDoc(doc(database, COL, d.id))));
+    cache = {}; emitChange();
+    return snap.size;
+  }
+  const n = Object.keys(cache).length;
+  cache = {}; writeLocal(); emitChange();
+  return n;
+}
 
 /* ---- load-status vocabulary (the ONE source; the Matrix cell + the Fleet
    Status page both read these so a truck's operational status never disagrees

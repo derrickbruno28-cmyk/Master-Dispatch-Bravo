@@ -104,6 +104,24 @@ export function removeTruck(tractor: string) {
   return cache;
 }
 
+/* Reset the whole roster back to the bare Fleetio seed (just tractor + make; no
+   drivers, type, terminal, or status). Live: deletes every assetFleet doc and
+   rewrites the bare seed; demo: reseeds the local copy. Owner-triggered — this
+   discards any crews/edits and restores a clean fleet. */
+export async function resetFleetToBare(): Promise<number> {
+  const seeded = seedTrucks();
+  if (firebaseEnabled && db) {
+    const database = db;
+    const snap = await getDocs(collection(database, COL));
+    await Promise.all(snap.docs.map((d) => deleteDoc(doc(database, COL, d.id))));
+    await Promise.all(seeded.map((t) => setDoc(doc(database, COL, t.tractor), t as unknown as Record<string, unknown>)));
+    cache = seeded; emitChange();
+    return seeded.length;
+  }
+  cache = seeded; writeLocal(); emitChange();
+  return seeded.length;
+}
+
 export function blankTruck(): FleetTruck {
   return {
     tractor: '', rating: 'A', driver1: '', driver2: '', type: 'OTR Team',

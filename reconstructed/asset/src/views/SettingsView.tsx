@@ -9,7 +9,9 @@ import { firebaseEnabled } from '../firebase';
 import { hasLocalData, localCounts, restoreLocalToShared } from '../data/recoverLocal';
 import { runDiagnostics, type Diag } from '../data/diagnostics';
 import { refreshDriversFromShared } from '../data/driversStore';
-import { refreshFleetFromShared } from '../data/fleetStore';
+import { refreshFleetFromShared, resetFleetToBare } from '../data/fleetStore';
+import { clearAllAssignments } from '../data/schedule';
+import { isOwner } from '../data/permStore';
 
 /* Integrations — the connection panel for external telematics. Samsara is the
    big one: paste an API key here (kept in this browser only, never in code), and
@@ -40,6 +42,19 @@ export default function SettingsView() {
   const [restoring, setRestoring] = useState(false);
   const [restoreMsg, setRestoreMsg] = useState('');
   const counts = localCounts();
+
+  /* owner-only: reset the shared live board — clears the calendar + restores a
+     bare fleet (fixes leftover Dallas/OTR-Team fillers + stuck loads on live) */
+  const [confirmReset, setConfirmReset] = useState(false);
+  const [resetting, setResetting] = useState(false);
+  const [resetMsg, setResetMsg] = useState('');
+  async function doReset() {
+    setResetting(true); setResetMsg('');
+    const loads = await clearAllAssignments();
+    const trucks = await resetFleetToBare();
+    setResetting(false); setConfirmReset(false);
+    setResetMsg(`✓ Board reset — cleared ${loads} calendar load${loads === 1 ? '' : 's'} and restored ${trucks} bare trucks (tractor + make only, no drivers/terminal/status). Refresh and the board will match a clean fleet.`);
+  }
 
   /* Fleetio live-sync toggle + connectivity test */
   const [fltLive, setFltLive] = useState<boolean>(() => fleetioLiveEnabled());
@@ -77,6 +92,29 @@ export default function SettingsView() {
         Connect the trucks' telematics here. Keys live only in your browser and are never stored in the app's code.
         The connection UI is ready now; features run on realistic placeholder data until the backend link is finished.
       </p>
+
+      {/* owner-only: one-time reset of the shared LIVE board (Firestore data) */}
+      {isOwner() && (
+        <div className="intg-card" style={{ borderColor: 'var(--red)' }}>
+          <div className="intg-card-head">
+            <div className="intg-card-title">🧹 Reset the board to a clean fleet <span className="intg-card-sub">owner only</span></div>
+          </div>
+          <p className="am-muted" style={{ fontSize: 12.5, maxWidth: 760 }}>
+            Wipes the <b>calendar</b> and restores every truck to a <b>bare profile</b> (just the tractor # + make — no drivers,
+            terminal, type, or status). Use this once to fix the <b>live</b> board if it still shows leftover
+            <b> Dallas / OTR&nbsp;Team</b> fillers or <b>stuck loads</b> from the earlier seed. This changes the shared data everyone sees.
+          </p>
+          {confirmReset ? (
+            <div className="am-lockbtns" style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+              <button className="am-save" disabled={resetting} style={{ background: 'var(--red)', borderColor: 'var(--red)' }} onClick={doReset}>{resetting ? 'Resetting…' : '⚠ Yes — reset the board now'}</button>
+              <button className="am-clear" disabled={resetting} onClick={() => setConfirmReset(false)}>Cancel</button>
+            </div>
+          ) : (
+            <button className="am-clear" onClick={() => setConfirmReset(true)}>🧹 Reset board…</button>
+          )}
+          {resetMsg && <div className="am-notice" style={{ color: 'var(--green)', marginTop: 8 }}>{resetMsg}</div>}
+        </div>
+      )}
 
       {/* recover data saved on this device before shared sync existed */}
       {firebaseEnabled && hasLocalData() && (
