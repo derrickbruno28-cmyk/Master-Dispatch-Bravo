@@ -23,6 +23,8 @@ import { fetchExceptions, openExceptions } from '../data/tms/exceptionsStore';
 import { onChange } from '../data/bus';
 import NotesTab from './NotesTab';
 import RateConReview from './RateConReview';
+import { financialStrip, financialsOf } from '../data/tms/financials';
+import { FSC_TYPES, type FscType, type LoadFinancials } from '../data/tms/types';
 import { parseRateCon, type RateConProposal, type RateConPatch } from '../data/tms/rateconParse';
 import {
   fetchNotes, noteCount, lockStateOf, acquireLock, heartbeat, releaseLock,
@@ -189,9 +191,12 @@ export default function LoadDetailModal({ tractor, date, assignment, canDel, ini
           <div>
             <h3>{l.routeName.trim() || 'New Load'} <span className="am-muted">· {l.assignedTruck ? `#${l.assignedTruck}` : 'unassigned'} · {l.date || '—'}</span></h3>
             <div className="load-summary">
-              <Sum label="Rate / Revenue" val={fmtMoney(l.rate)} money />
-              <Sum label="Distance" val={fmtMiles(l.laneMiles)} />
-              <Sum label="CPM (rev/mi)" val={fmtCpm(l.cpm)} />
+              {/* PHASE 9 — the computed strip. Everything except rate, FSC and
+                  empty miles is derived on read, so these can never disagree
+                  with the inputs below them. */}
+              {financialStrip(l).map((s) => (
+                <Sum key={s.label} label={s.label} val={s.value} money={s.label === 'Revenue' || s.label === 'Flat Rate'} />
+              ))}
               <Sum label="Stops" val={String(l.stops.length)} />
               <Sum label="Weight" val={l.weight || '—'} />
             </div>
@@ -273,6 +278,14 @@ export default function LoadDetailModal({ tractor, date, assignment, canDel, ini
   );
 }
 
+/* One place that writes financials, so the nested object is never half-replaced.
+   `f` is the InfoTab's field setter — the patch lands on the in-memory load and
+   is saved with everything else, not written behind the user's back. */
+function setFin(l: Load, f: <K extends keyof Load>(k: K, v: Load[K]) => void, patch: Partial<LoadFinancials>) {
+  const next = { ...financialsOf(l), ...patch };
+  (f as unknown as (k: string, v: unknown) => void)('financials', next);
+}
+
 function Sum({ label, val, money }: { label: string; val: string; money?: boolean }) {
   return <span className="load-sum"><span className="load-sum-label">{label}</span><b className={money ? 'load-sum-money' : ''}>{val}</b></span>;
 }
@@ -349,7 +362,22 @@ function InfoTab({ l, f, canDel, assignable, autoFilled, onRateCon, onNotice, on
           </L>
         </div>
         <div className="load-two">
-          <L t="Rate (revenue $)"><input className={`${hl('rate')} load-rate-input`} type="number" value={l.rate ?? ''} onChange={(e) => f('rate', e.target.value === '' ? null : Number(e.target.value))} placeholder="0.00" /></L>
+          <L t="Rate (revenue $)"><input className={`${hl('rate')} load-rate-input`} type="number" value={l.rate ?? ''}
+            onChange={(e) => { const v = e.target.value === '' ? null : Number(e.target.value); f('rate', v); setFin(l, f, { rate: v }); }} placeholder="0.00" /></L>
+          {/* PHASE 9 — fuel surcharge. The TYPE is stored with the number because
+              $0.42 per mile and 42% of the invoice are not the same money. */}
+          <L t="FSC type">
+            <select className="am-input" value={financialsOf(l).fscType}
+              onChange={(e) => setFin(l, f, { fscType: e.target.value as FscType | '' })}>
+              <option value="">— no fuel surcharge —</option>
+              {FSC_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
+            </select>
+          </L>
+          <L t="FSC rate"><input className="am-input" type="number" value={financialsOf(l).fscRate ?? ''}
+            placeholder={financialsOf(l).fscType === 'Per Mile' ? '$ per mile' : financialsOf(l).fscType === 'Invoice %' ? 'percent' : 'dollars'}
+            onChange={(e) => setFin(l, f, { fscRate: e.target.value === '' ? null : Number(e.target.value) })} /></L>
+          <L t="Empty / deadhead miles"><input className="am-input" type="number" value={financialsOf(l).emptyMiles ?? ''}
+            placeholder="0" onChange={(e) => setFin(l, f, { emptyMiles: e.target.value === '' ? null : Number(e.target.value) })} /></L>
           <L t="Weight"><input className={hl('weight')} value={l.weight} onChange={(e) => f('weight', e.target.value)} placeholder="e.g. 24,000 lbs" /></L>
         </div>
         <div className="load-two">

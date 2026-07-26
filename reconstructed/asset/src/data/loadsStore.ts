@@ -340,8 +340,12 @@ export function missingForDispatch(l: Load): string[] {
   return out;
 }
 
+/* Cents when there are cents, none when there aren't. "$3,468.8" reads as a
+   typo and "$2,500.00" is noise on a round number — money is quoted to people,
+   so it has to look like money. */
 export const fmtMoney = (n: number | null | undefined) =>
-  n == null ? '—' : `$${n.toLocaleString(undefined, { maximumFractionDigits: 2 })}`;
+  (n == null ? '—'
+    : `$${n.toLocaleString(undefined, Number.isInteger(n) ? {} : { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`);
 export const fmtMiles = (n: number | null | undefined) => (n == null ? '—' : `${n.toLocaleString()} mi`);
 export const fmtCpm = (n: number | null | undefined) => (n == null ? '—' : `$${n.toFixed(2)}/mi`);
 

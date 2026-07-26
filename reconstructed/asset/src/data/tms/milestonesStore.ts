@@ -410,9 +410,30 @@ export function effectiveStatus(l: LegacyLoad): string {
    A human-pinned status (statusManualOverride) is left alone. */
 export async function applyDerivedStatus(l: LegacyLoad): Promise<string> {
   const t = l as unknown as Partial<TmsLoad>;
+
+  /* PHASE 9 — the first half of the billing state machine. Delivering the final
+     stop moves a load out of NOT_READY and into MISSING_DOCS, which is what puts
+     it on the Billing queue for whoever chases paperwork. The second half
+     (MISSING_DOCS → READY_FOR_ACCOUNTING) belongs to the documents, not to a
+     milestone, and lives in documentsStore.refreshDocFlags. */
+  const stopsNow = stopsFor(l);
+  const finalStop = stopsNow[stopsNow.length - 1];
+  const delivered = !!finalStop && storedMilestones(l.id)
+    .some((m) => m.stopId === finalStop.id && m.eventType === 'Delivery Completed');
+  if (delivered && (t.billingStatus ?? 'NOT_READY') === 'NOT_READY') {
+    const moved = await saveLoad({ ...l, ...({ billingStatus: 'MISSING_DOCS' } as Partial<LegacyLoad>) });
+    writeAudit(l.id, {
+      action: 'billing.auto',
+      target: `loads/${l.id}`,
+      summary: 'NOT_READY → MISSING_DOCS — the final delivery was completed',
+      before: { billingStatus: 'NOT_READY' }, after: { billingStatus: 'MISSING_DOCS' },
+    });
+    l = moved;
+  }
+
   if (t.statusManualOverride) return l.status;
 
-  const next = deriveStatus(l, t.billingStatus);
+  const next = deriveStatus(l, (l as unknown as Partial<TmsLoad>).billingStatus);
   if (!next || next === l.status) return l.status;
 
   const saved = await saveLoad({ ...l, status: next });

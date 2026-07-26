@@ -5,6 +5,8 @@ import { loadDrivers } from '../data/driversStore';
 import { TERMINALS, TERMINAL_LABELS } from '../data/fleet';
 import { mondayOf, isoDate } from '../data/schedule';
 import { onChange } from '../data/bus';
+import { allFinRows } from '../data/tms/billing';
+import { rollup } from '../data/tms/financials';
 
 /* Financials — revenue & CPM analytics off the load records. Revenue attributes
    to the assigned truck + team (per SEGMENT for split loads, via attributionRows).
@@ -91,11 +93,60 @@ export default function FinancialsView({ page }: { page: FinPage }) {
         <Kpi label="Avg CPM" val={fmtCpm(kpis.avgCpm)} accent="var(--accent)" />
       </div>
 
+      {/* PHASE 9 — five entities across three terminals, so every report carries
+          the authority and terminal split. Without it "revenue was up" is a
+          sentence with no owner. */}
+      <AuthorityTerminal range={range} term={term} />
+
       {page === 'cpm' && <ByLane rows={rows} />}
       {page === 'customer' && <ByGroup rows={rows} keyOf={(r) => r.customer} label="Customer" file="revenue-by-customer" />}
       {page === 'truck' && <ByGroup rows={rows} keyOf={(r) => r.truck || '(unassigned)'} label="Truck" file="revenue-by-truck"
         extra={(k) => teamLabel.get(k) ?? ''} extraHead="Team" />}
       {page === 'miles' && <DriverMiles rows={rows} />}
+    </div>
+  );
+}
+
+function AuthorityTerminal({ range, term }: { range: 'week' | 'month' | 'all'; term: string }) {
+  const rows = useMemo(() => {
+    const today = isoDate(new Date());
+    const weekStart = isoDate(mondayOf(new Date()));
+    const monthStart = today.slice(0, 8) + '01';
+    return allFinRows().filter((r) => {
+      if (range === 'week' && r.date < weekStart) return false;
+      if (range === 'month' && r.date < monthStart) return false;
+      if (term !== 'ALL' && r.terminal !== term) return false;
+      return true;
+    });
+  }, [range, term]);
+
+  const byAuthority = useMemo(() => rollup(rows, (r) => r.authority), [rows]);
+  const byTerminal = useMemo(() => rollup(rows, (r) => r.terminal), [rows]);
+  if (rows.length === 0) return null;
+
+  return (
+    <div className="bill-breakdowns">
+      {[['By booking authority', byAuthority], ['By terminal', byTerminal]].map(([title, groups]) => (
+        <div className="bill-breakdown" key={title as string}>
+          <div className="rc-section">{title as string}</div>
+          <table className="am-grid bill-mini">
+            <tbody>
+              {(groups as ReturnType<typeof rollup>).map((g) => (
+                <tr key={g.key}>
+                  <td>{g.key}</td>
+                  <td className="am-muted">{g.loads} load{g.loads === 1 ? '' : 's'}</td>
+                  <td><b>{fmtMoney(g.revenue)}</b></td>
+                  <td className="am-muted">{g.cpm == null ? '—' : `$${g.cpm.toFixed(2)}/mi`}</td>
+                  <td>
+                    <span className="otp-bar"><span className="otp-bar-fill bill-fill" style={{ width: `${Math.min(100, g.share)}%` }} /></span>
+                    <span className="am-muted otp-share">{g.share.toFixed(0)}%</span>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ))}
     </div>
   );
 }

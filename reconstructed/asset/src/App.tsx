@@ -15,6 +15,7 @@ import DriversView from './views/DriversView';
 import RolesView from './views/RolesView';
 import SettingsView from './views/SettingsView';
 import FinancialsView, { type FinPage } from './views/FinancialsView';
+import BillingView from './views/BillingView';
 import { loadDrivers } from './data/driversStore';
 import { loadFleet } from './data/fleetStore';
 import { ROUTES } from './data/fleet';
@@ -29,11 +30,11 @@ import { startOdometerSync } from './data/fleetioSync';
    kept minimal, and driver / team / route look-ups are separate filters below
    the header (not one catch-all search box). */
 
-const APP_VERSION = '0.41.0';
+const APP_VERSION = '0.42.0';
 
 type Tab = 'matrix' | 'optimizer' | 'otp' | 'covered' | 'repo' | 'fleet' | 'fleet-map'
   | 'trucks' | 'trailers' | 'loads' | 'drivers' | 'roles'
-  | 'fin-cpm' | 'fin-customer' | 'fin-truck' | 'fin-miles' | 'integrations';
+  | 'fin-cpm' | 'fin-customer' | 'fin-truck' | 'fin-miles' | 'fin-billing' | 'integrations';
 
 interface NavItem { key: Tab; label: string; managerOnly?: boolean; sub?: string }
 const NAV_GROUPS: { title: string; items: NavItem[]; restricted?: boolean }[] = [
@@ -59,6 +60,7 @@ const NAV_GROUPS: { title: string; items: NavItem[]; restricted?: boolean }[] = 
     { key: 'fin-customer', label: '🏷 By Customer', sub: 'Reports' },
     { key: 'fin-truck', label: '🚚 By Truck / Team' },
     { key: 'fin-miles', label: '🛣 Driver Miles' },
+    { key: 'fin-billing', label: '🧾 Billing' },
   ] },
   { title: 'Setup', restricted: true, items: [
     { key: 'roles', label: '🔑 Roles', managerOnly: true },
@@ -142,7 +144,7 @@ export default function App() {
 
   const showRoles = canManageRoles();
   const seeFin = canSeeFinancials();   // Financials + Setup: Owner / US Ops only
-  const RESTRICTED_TABS: Tab[] = ['fin-cpm', 'fin-customer', 'fin-truck', 'fin-miles', 'roles', 'integrations'];
+  const RESTRICTED_TABS: Tab[] = ['fin-cpm', 'fin-customer', 'fin-truck', 'fin-miles', 'fin-billing', 'roles', 'integrations'];
   /* if the current tab just became hidden (role changed), fall back to the matrix */
   useEffect(() => {
     if (tab === 'roles' && !showRoles) setTab('matrix');
@@ -261,6 +263,7 @@ export default function App() {
           {tab === 'roles' && showRoles && <RolesView />}
           {tab === 'integrations' && <SettingsView />}
           {finPageOf(tab) && <FinancialsView page={finPageOf(tab)!} />}
+          {tab === 'fin-billing' && <BillingView />}
         </main>
       </div>
     </div>
