@@ -1,94 +1,112 @@
+/* OTP / OTD — PHASE 6.
+
+   THIS SCREEN NO LONGER TAKES INPUT.
+   The "+ Log Shipment" form is gone on purpose. Every row here is derived from
+   the loads and their milestone ladders, so the on-time number and the dispatch
+   board can never tell two different stories. If a row looks wrong, the fix is
+   on the load's Milestones tab — which is also where the late reason came from,
+   because Phase 2 refuses to save a late completion without one.
+
+   Pending is not a pass. A stop nobody logged is an unknown, and it stays out of
+   the percentage instead of quietly inflating it. */
+
 import { useEffect, useMemo, useState } from 'react';
+import { onChange } from '../data/bus';
+import { loadAll } from '../data/loadsStore';
+import { fetchMilestones } from '../data/tms/milestonesStore';
+import { fetchStops } from '../data/tms/stopsStore';
+import { fetchAssignments } from '../data/tms/assignmentsStore';
 import {
-  OTP_DRIVERS, OTP_FAIL_REASONS, OTD_FAIL_REASONS, OTP_TARGET, OTD_TARGET,
-  loadShipments, saveShipments, computeStats, targetColor,
-  type Shipment, type OtpFlag,
-} from '../data/otp';
-
-/* OTP / OTD Tracker — ported from the Operations Center. Manual logging today;
-   built so a Samsara API fill can later create these same records automatically
-   from tracking + trip history (stamping source:'samsara'). */
-
-type Draft = Omit<Shipment, 'id'>;
-const BLANK: Draft = {
-  ls: '', loadId: '', trip: '', truck: '', primaryDriver: '', secondaryDriver: '',
-  loadType: 'Live Load', puAppt: '', puActual: '', otp: '✓', otpFailReason: '',
-  del1Appt: '', del1Actual: '', otd: '✓', otdFailReason: '', week: '', month: '',
-  notes: '', source: 'manual',
-};
-
-function seed(): Shipment[] {
-  const mk = (o: Partial<Shipment>, i: number): Shipment => ({ ...BLANK, id: `seed-${i}`, ...o });
-  return [
-    mk({ ls: '16186', trip: 'FA2D3-544', truck: '456', primaryDriver: 'Robert, Sr Spangler', otp: '✓', otd: '✓', week: '8', month: 'February 2026' }, 1),
-    mk({ ls: '16191', trip: 'FA2D3-301', truck: '765', primaryDriver: 'Derek Brewer', otp: '✓', otd: '✗', otdFailReason: 'Consignee Dock Congestion', week: '8', month: 'February 2026' }, 2),
-    mk({ ls: '16193', trip: 'FA26E-41', truck: '758', primaryDriver: 'Rafael Gama', otp: '✗', otpFailReason: 'Live Load – Dock Congestion', otd: 'Pending', week: '9', month: 'March 2026' }, 3),
-    mk({ ls: '16207', trip: 'FA2D3-569', truck: '957', primaryDriver: 'Daniel Jay Williams', otp: '✓', otd: 'Pending', week: '9', month: 'March 2026' }, 4),
-  ];
-}
+  allRows, computeStats, lateGroups, topFailReasons, targetColor, rowsToCsv, fmtActual,
+  OTP_TARGET, OTD_TARGET, type OtpFlag, type GroupBy,
+} from '../data/tms/performance';
 
 const flag = (v: OtpFlag) =>
-  v === '✓' ? <span className="badge badge-green">✓ ON TIME</span>
-  : v === '✗' ? <span className="badge badge-red">✗ LATE</span>
-  : <span className="badge badge-amber">⏳ PENDING</span>;
+  v === 'On Time' ? <span className="badge badge-green">✓ ON TIME</span>
+    : v === 'Late' ? <span className="badge badge-red">✗ LATE</span>
+      : <span className="badge badge-amber">⏳ PENDING</span>;
+
+const GROUPS: { key: GroupBy; label: string }[] = [
+  { key: 'reason', label: 'By reason' },
+  { key: 'driver', label: 'By driver' },
+  { key: 'terminal', label: 'By terminal' },
+  { key: 'customer', label: 'By customer' },
+];
 
 export default function OTPView() {
-  const [ships, setShips] = useState<Shipment[]>(() => { const l = loadShipments(); return l.length ? l : seed(); });
-  const [formOpen, setFormOpen] = useState(false);
-  const [form, setForm] = useState<Draft>(BLANK);
+  const [, force] = useState(0);
   const [fWeek, setFWeek] = useState('all');
   const [fDriver, setFDriver] = useState('all');
   const [fStatus, setFStatus] = useState('all');
   const [q, setQ] = useState('');
+  const [groupBy, setGroupBy] = useState<GroupBy>('reason');
+  const [reportOpen, setReportOpen] = useState(false);
 
-  useEffect(() => { saveShipments(ships); }, [ships]);
+  useEffect(() => onChange(() => force((n) => n + 1)), []);
 
-  const weeks = useMemo(() => [...new Set(ships.map((s) => s.week).filter(Boolean))].sort(), [ships]);
+  /* pull the subcollections this screen reads. In demo they're already local;
+     live, this is the one place that warms them for every load on the page. */
+  useEffect(() => {
+    void (async () => {
+      for (const l of loadAll()) {
+        await Promise.all([fetchStops(l.id), fetchMilestones(l.id), fetchAssignments(l.id)]);
+      }
+      force((n) => n + 1);
+    })();
+  }, []);
+
+  const rows = useMemo(() => allRows(), []);
+  const weeks = useMemo(() => [...new Set(rows.map((r) => r.week).filter(Boolean))]
+    .sort((a, b) => Number(b) - Number(a)), [rows]);
+  const drivers = useMemo(() => [...new Set(rows.flatMap((r) => [r.driver, r.delDriver]).filter(Boolean))].sort(), [rows]);
+
   const filtered = useMemo(() => {
-    let d = ships;
-    if (fWeek !== 'all') d = d.filter((s) => s.week === fWeek);
-    if (fDriver !== 'all') d = d.filter((s) => s.primaryDriver === fDriver || s.secondaryDriver === fDriver);
-    if (fStatus === 'otp_fail') d = d.filter((s) => s.otp === '✗');
-    else if (fStatus === 'otd_fail') d = d.filter((s) => s.otd === '✗');
-    else if (fStatus === 'any_fail') d = d.filter((s) => s.otp === '✗' || s.otd === '✗');
-    else if (fStatus === 'pending') d = d.filter((s) => s.otp === 'Pending' || s.otd === 'Pending');
-    else if (fStatus === 'clean') d = d.filter((s) => s.otp === '✓' && s.otd === '✓');
+    let d = rows;
+    if (fWeek !== 'all') d = d.filter((r) => r.week === fWeek);
+    if (fDriver !== 'all') d = d.filter((r) => r.driver === fDriver || r.delDriver === fDriver);
+    if (fStatus === 'otp_fail') d = d.filter((r) => r.otp === 'Late');
+    else if (fStatus === 'otd_fail') d = d.filter((r) => r.otd === 'Late');
+    else if (fStatus === 'any_fail') d = d.filter((r) => r.otp === 'Late' || r.otd === 'Late');
+    else if (fStatus === 'pending') d = d.filter((r) => r.otp === 'Pending' || r.otd === 'Pending');
+    else if (fStatus === 'clean') d = d.filter((r) => r.otp === 'On Time' && r.otd === 'On Time');
     const n = q.trim().toLowerCase();
-    if (n) d = d.filter((s) => `${s.trip} ${s.primaryDriver} ${s.loadId} ${s.ls} ${s.truck}`.toLowerCase().includes(n));
+    if (n) d = d.filter((r) => `${r.trip} ${r.driver} ${r.delDriver} ${r.ls} ${r.truck} ${r.customer}`.toLowerCase().includes(n));
     return d;
-  }, [ships, fWeek, fDriver, fStatus, q]);
+  }, [rows, fWeek, fDriver, fStatus, q]);
 
   const stats = useMemo(() => computeStats(filtered), [filtered]);
-  const reasons = useMemo(() => {
-    const m: Record<string, number> = {};
-    ships.forEach((s) => { if (s.otpFailReason) m[s.otpFailReason] = (m[s.otpFailReason] ?? 0) + 1; if (s.otdFailReason) m[s.otdFailReason] = (m[s.otdFailReason] ?? 0) + 1; });
-    return Object.entries(m).sort((a, b) => b[1] - a[1]).slice(0, 6);
-  }, [ships]);
+  const fails = useMemo(() => topFailReasons(filtered), [filtered]);
+  const groups = useMemo(() => lateGroups(filtered, groupBy), [filtered, groupBy]);
 
-  function set<K extends keyof Draft>(k: K, v: Draft[K]) { setForm((f) => ({ ...f, [k]: v })); }
-  function add() {
-    if (!form.trip && !form.ls) return;
-    setShips((p) => [{ ...form, id: `s-${Date.now()}` }, ...p]);
-    setForm(BLANK); setFormOpen(false);
+  function exportCsv() {
+    const blob = new Blob([rowsToCsv(filtered)], { type: 'text/csv' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `otp-otd-${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click();
   }
 
   const KPIS = [
-    { label: 'OTP RATE', val: `${stats.otpPct.toFixed(1)}%`, color: targetColor(stats.otpPct, OTP_TARGET) },
-    { label: 'OTD RATE', val: `${stats.otdPct.toFixed(1)}%`, color: targetColor(stats.otdPct, OTD_TARGET) },
-    { label: 'LOADS', val: String(stats.total), color: 'var(--text)' },
-    { label: 'OTP FAILS', val: String(stats.otpFail), color: stats.otpFail ? 'var(--red)' : 'var(--green)' },
-    { label: 'PENDING', val: String(stats.otpPend + stats.otdPend), color: 'var(--amber)' },
+    { label: 'OTP RATE', val: `${stats.otpPct.toFixed(1)}%`, color: targetColor(stats.otpPct, OTP_TARGET), sub: `${stats.otpOnTime}/${stats.otpScored} scored` },
+    { label: 'OTD RATE', val: `${stats.otdPct.toFixed(1)}%`, color: targetColor(stats.otdPct, OTD_TARGET), sub: `${stats.otdOnTime}/${stats.otdScored} scored` },
+    { label: 'LOADS', val: String(stats.total), color: 'var(--text)', sub: 'in view' },
+    { label: 'LATE', val: String(stats.otpLate + stats.otdLate), color: stats.otpLate + stats.otdLate ? 'var(--red)' : 'var(--green)', sub: `${stats.otpLate} pickup · ${stats.otdLate} delivery` },
+    { label: 'UNLOGGED', val: String(stats.otpPending + stats.otdPending), color: 'var(--amber)', sub: 'not counted either way' },
   ];
 
   return (
     <div className="am-page">
       <div className="am-head">
         <div>
-          <h2>OTP / OTD Tracker</h2>
-          <span className="am-muted">Targets: OTP ≥ {OTP_TARGET}% · OTD ≥ {OTD_TARGET}% · {ships.length} loads tracked</span>
+          <h2>OTP / OTD</h2>
+          <span className="am-muted">
+            Targets: OTP ≥ {OTP_TARGET}% · OTD ≥ {OTD_TARGET}% · read live from milestones — nothing is keyed in here
+          </span>
         </div>
-        <span className="otp-samsara" title="Planned: auto-fill these records from Samsara tracking + trip history">🔗 Samsara auto-fill — planned</span>
-        <button className="am-save otp-log-btn" onClick={() => setFormOpen((o) => !o)}>{formOpen ? '× Close' : '+ Log Shipment'}</button>
+        <button className="am-clear" onClick={() => setReportOpen((o) => !o)}>
+          {reportOpen ? '× Close late-reason report' : '📊 Late Reasons report'}
+        </button>
+        <button className="am-clear" onClick={exportCsv}>⭳ Export CSV</button>
       </div>
 
       <div className="otp-kpis">
@@ -96,73 +114,106 @@ export default function OTPView() {
           <div key={k.label} className="otp-kpi">
             <div className="otp-kpi-label">{k.label}</div>
             <div className="otp-kpi-val" style={{ color: k.color }}>{k.val}</div>
+            <div className="otp-kpi-sub">{k.sub}</div>
           </div>
         ))}
       </div>
 
-      {formOpen && (
-        <div className="otp-form">
-          <div className="otp-form-grid">
-            <L t="LS #"><input className="am-input" value={form.ls} onChange={(e) => set('ls', e.target.value)} /></L>
-            <L t="Load ID"><input className="am-input" value={form.loadId} onChange={(e) => set('loadId', e.target.value)} /></L>
-            <L t="Trip #"><input className="am-input" placeholder="FA2D3-575" value={form.trip} onChange={(e) => set('trip', e.target.value)} /></L>
-            <L t="Truck #"><input className="am-input" value={form.truck} onChange={(e) => set('truck', e.target.value)} /></L>
-            <L t="Primary driver"><select className="am-input" value={form.primaryDriver} onChange={(e) => set('primaryDriver', e.target.value)}><option value="">Select…</option>{OTP_DRIVERS.map((d) => <option key={d}>{d}</option>)}</select></L>
-            <L t="Secondary driver"><select className="am-input" value={form.secondaryDriver} onChange={(e) => set('secondaryDriver', e.target.value)}><option value="">None</option>{OTP_DRIVERS.map((d) => <option key={d}>{d}</option>)}</select></L>
-            <L t="Load type"><select className="am-input" value={form.loadType} onChange={(e) => set('loadType', e.target.value)}><option>Live Load</option><option>Pre-Load</option></select></L>
-            <L t="PU appt"><input className="am-input" type="datetime-local" value={form.puAppt} onChange={(e) => set('puAppt', e.target.value)} /></L>
-            <L t="PU actual"><input className="am-input" type="datetime-local" value={form.puActual} onChange={(e) => set('puActual', e.target.value)} /></L>
-            <L t="OTP status"><select className="am-input" value={form.otp} onChange={(e) => set('otp', e.target.value as OtpFlag)}><option value="✓">✓ On Time</option><option value="✗">✗ Late</option><option value="Pending">⏳ Pending</option></select></L>
-            {form.otp === '✗' && <L t="OTP fail reason"><select className="am-input" value={form.otpFailReason} onChange={(e) => set('otpFailReason', e.target.value)}><option value="">Select…</option>{OTP_FAIL_REASONS.map((r) => <option key={r}>{r}</option>)}</select></L>}
-            <L t="Del appt"><input className="am-input" type="datetime-local" value={form.del1Appt} onChange={(e) => set('del1Appt', e.target.value)} /></L>
-            <L t="Del actual"><input className="am-input" type="datetime-local" value={form.del1Actual} onChange={(e) => set('del1Actual', e.target.value)} /></L>
-            <L t="OTD status"><select className="am-input" value={form.otd} onChange={(e) => set('otd', e.target.value as OtpFlag)}><option value="✓">✓ On Time</option><option value="✗">✗ Late</option><option value="Pending">⏳ Pending</option></select></L>
-            {form.otd === '✗' && <L t="OTD fail reason"><select className="am-input" value={form.otdFailReason} onChange={(e) => set('otdFailReason', e.target.value)}><option value="">Select…</option>{OTD_FAIL_REASONS.map((r) => <option key={r}>{r}</option>)}</select></L>}
-            <L t="Week #"><input className="am-input" value={form.week} onChange={(e) => set('week', e.target.value)} /></L>
-            <L t="Month"><input className="am-input" placeholder="March 2026" value={form.month} onChange={(e) => set('month', e.target.value)} /></L>
-          </div>
-          <div className="otp-form-btns">
-            <button className="am-save" disabled={!form.trip && !form.ls} onClick={add}>✅ Save Shipment</button>
-            <button className="am-cancel" onClick={() => setFormOpen(false)}>Cancel</button>
-            {!form.trip && !form.ls && <span className="am-muted" style={{ fontSize: 11, color: 'var(--red)' }}>Enter at least a Trip # or LS #.</span>}
-          </div>
-        </div>
-      )}
-
       <div className="am-head" style={{ marginTop: 4 }}>
-        <select className="am-input" style={{ maxWidth: 130 }} value={fWeek} onChange={(e) => setFWeek(e.target.value)}><option value="all">All weeks</option>{weeks.map((w) => <option key={w} value={w}>Week {w}</option>)}</select>
-        <select className="am-input" style={{ maxWidth: 170 }} value={fDriver} onChange={(e) => setFDriver(e.target.value)}><option value="all">All drivers</option>{OTP_DRIVERS.map((d) => <option key={d} value={d}>{d}</option>)}</select>
-        <select className="am-input" style={{ maxWidth: 150 }} value={fStatus} onChange={(e) => setFStatus(e.target.value)}>
-          <option value="all">All statuses</option><option value="any_fail">Any fail</option><option value="otp_fail">OTP fail</option><option value="otd_fail">OTD fail</option><option value="pending">Pending</option><option value="clean">Clean</option>
+        <select className="am-input" style={{ maxWidth: 130 }} value={fWeek} onChange={(e) => setFWeek(e.target.value)}>
+          <option value="all">All weeks</option>{weeks.map((w) => <option key={w} value={w}>Week {w}</option>)}
         </select>
-        <input className="am-input" style={{ maxWidth: 200 }} placeholder="Search trip / driver / LS…" value={q} onChange={(e) => setQ(e.target.value)} />
+        <select className="am-input" style={{ maxWidth: 190 }} value={fDriver} onChange={(e) => setFDriver(e.target.value)}>
+          <option value="all">All drivers</option>{drivers.map((d) => <option key={d} value={d}>{d}</option>)}
+        </select>
+        <select className="am-input" style={{ maxWidth: 150 }} value={fStatus} onChange={(e) => setFStatus(e.target.value)}>
+          <option value="all">All statuses</option><option value="any_fail">Any late</option>
+          <option value="otp_fail">Late pickup</option><option value="otd_fail">Late delivery</option>
+          <option value="pending">Unlogged</option><option value="clean">Clean</option>
+        </select>
+        <input className="am-input" style={{ maxWidth: 220 }} placeholder="Search trip / driver / LS / customer…" value={q} onChange={(e) => setQ(e.target.value)} />
         <span className="am-muted">{filtered.length} shown</span>
       </div>
 
-      {reasons.length > 0 && (
+      {fails.length > 0 && (
         <div className="otp-reasons">
           <span className="am-muted">Top fail reasons:</span>
-          {reasons.map(([r, n]) => <span key={r} className="otp-reason">{r} <b>{n}</b></span>)}
+          {fails.map((f) => <span key={f.key} className="otp-reason">{f.key} <b>{f.count}</b></span>)}
+        </div>
+      )}
+
+      {reportOpen && (
+        <div className="otp-report">
+          <div className="otp-report-head">
+            <b>Late Reasons</b>
+            <span className="am-muted">
+              Every late pickup or delivery in the current filter, grouped. The reason text comes
+              from the milestone the driver or dispatcher logged — it is not re-typed here.
+            </span>
+            <span className="otp-groupchips">
+              {GROUPS.map((g) => (
+                <button key={g.key} className={`am-billchip ${groupBy === g.key ? 'on ready_for_accounting' : ''}`}
+                  onClick={() => setGroupBy(g.key)}>{g.label}</button>
+              ))}
+            </span>
+          </div>
+          {groups.length === 0
+            ? <div className="am-muted">No late stops in this filter. Nothing to explain.</div>
+            : (
+              <table className="am-grid otp-table">
+                <thead><tr><th>{GROUPS.find((g) => g.key === groupBy)?.label.replace('By ', '')}</th><th>Late</th><th>Pickup</th><th>Delivery</th><th>Share</th></tr></thead>
+                <tbody>
+                  {groups.map((g) => (
+                    <tr key={g.key}>
+                      <td>{g.key}</td>
+                      <td><b>{g.count}</b></td>
+                      <td className="am-muted">{g.pickup}</td>
+                      <td className="am-muted">{g.delivery}</td>
+                      <td>
+                        <span className="otp-bar"><span className="otp-bar-fill" style={{ width: `${Math.min(100, g.share)}%` }} /></span>
+                        <span className="am-muted otp-share">{g.share.toFixed(0)}%</span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
         </div>
       )}
 
       <div className="am-scroll">
         <table className="am-grid otp-table">
-          <thead><tr><th>LS</th><th>Trip</th><th>Truck</th><th>Driver</th><th>Load type</th><th>OTP</th><th>OTD</th><th>Week</th><th>Src</th></tr></thead>
+          <thead>
+            <tr>
+              <th>LS #</th><th>Trip</th><th>Truck</th><th>Driver</th><th>Load type</th>
+              <th>OTP</th><th>OTD</th><th>Week</th><th>Late reason</th>
+            </tr>
+          </thead>
           <tbody>
             {filtered.length === 0 ? (
-              <tr><td colSpan={9} className="am-muted" style={{ textAlign: 'center', padding: 18 }}>No shipments match. Log one with “+ Log Shipment”.</td></tr>
-            ) : filtered.map((s) => (
-              <tr key={s.id} className={s.otp === '✗' || s.otd === '✗' ? 'otp-fail-row' : ''}>
-                <td>{s.ls || '—'}</td>
-                <td className="opt-route">{s.trip || '—'}</td>
-                <td>{s.truck ? `#${s.truck}` : '—'}</td>
-                <td>{s.primaryDriver || '—'}{s.secondaryDriver && <span className="am-muted"> · {s.secondaryDriver}</span>}</td>
-                <td className="am-muted">{s.loadType}</td>
-                <td>{flag(s.otp)}{s.otpFailReason && <div className="otp-fr">{s.otpFailReason}</div>}</td>
-                <td>{flag(s.otd)}{s.otdFailReason && <div className="otp-fr">{s.otdFailReason}</div>}</td>
-                <td>{s.week || '—'}</td>
-                <td>{s.source === 'samsara' ? <span className="badge badge-blue">Samsara</span> : <span className="am-muted">manual</span>}</td>
+              <tr><td colSpan={9} className="am-muted" style={{ textAlign: 'center', padding: 18 }}>
+                No loads match this filter. Rows appear here as soon as a load exists — the OTP and OTD
+                columns fill in when its pickup and delivery milestones are logged.
+              </td></tr>
+            ) : filtered.map((r) => (
+              <tr key={r.loadId} className={r.otp === 'Late' || r.otd === 'Late' ? 'otp-fail-row' : ''}>
+                <td>{r.ls || '—'}</td>
+                <td className="opt-route">{r.trip || '—'}{r.hasException && <span className="am-excbadge" title="Open exception on this load"> ⚠</span>}</td>
+                <td>{r.truck ? `#${r.truck}` : '—'}</td>
+                <td>
+                  {r.driver || '—'}
+                  {r.delDriver && r.delDriver !== r.driver && <span className="am-muted"> → {r.delDriver}</span>}
+                </td>
+                <td className="am-muted">{r.loadType || '—'}</td>
+                <td>{flag(r.otp)}{r.puActual && <div className="otp-fr" title={`appointment ${r.puAppt || '—'}`}>{fmtActual(r.puActual)}</div>}</td>
+                <td>{flag(r.otd)}{r.delActual && <div className="otp-fr" title={`appointment ${r.delAppt || '—'}`}>{fmtActual(r.delActual)}</div>}</td>
+                <td>{r.week || '—'}</td>
+                <td>
+                  {/* both sides can be late for different reasons — show both */}
+                  {r.otpLateReason && <div><b className="otp-reasoncell">PU: {r.otpLateReason}</b>{r.otpLateReasonDetail && <div className="otp-fr">{r.otpLateReasonDetail}</div>}</div>}
+                  {r.otdLateReason && <div><b className="otp-reasoncell">DEL: {r.otdLateReason}</b>{r.otdLateReasonDetail && <div className="otp-fr">{r.otdLateReasonDetail}</div>}</div>}
+                  {!r.otpLateReason && !r.otdLateReason && <span className="am-muted">—</span>}
+                </td>
               </tr>
             ))}
           </tbody>
@@ -170,8 +221,4 @@ export default function OTPView() {
       </div>
     </div>
   );
-}
-
-function L({ t, children }: { t: string; children: React.ReactNode }) {
-  return <label className="otp-field"><span className="otp-field-label">{t}</span>{children}</label>;
 }
