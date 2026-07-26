@@ -281,6 +281,10 @@ export interface TmsLoad extends Partial<Omit<LegacyLoad, 'weight'>> {
   financials: LoadFinancials;
   dispatchNotes: string;
   parentLoadId: string;           // set when spawned from an exception (Phase 5)
+  /* PHASE 5 — derived, like missingBol/missingPod: the board badges and filters
+     cells with an open exception, and it cannot open a subcollection per cell.
+     exceptionsStore.refreshExceptionFlag owns this field. */
+  hasOpenException: boolean;
   lock: LoadLock;
 
   /* Denormalized for board display only — the authoritative copy lives on the
@@ -475,7 +479,8 @@ export function blankTmsLoad(id: string, init?: Partial<TmsLoad>): TmsLoad {
     missingBol: true, missingPod: true,
     equipment: '', weight: null, commodity: '', isUspsContract: false,
     refs: blankRefs(), financials: blankFinancials(),
-    dispatchNotes: '', parentLoadId: '', lock: blankLock(), lastLateReason: '',
+    dispatchNotes: '', parentLoadId: '', hasOpenException: false,
+    lock: blankLock(), lastLateReason: '',
     createdBy: '', createdAt: '', updatedBy: '', updatedAt: '',
     ...init,
   };

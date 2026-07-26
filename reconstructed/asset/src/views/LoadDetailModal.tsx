@@ -18,6 +18,8 @@ import MilestonesTab from './MilestonesTab';
 import TripPicker from './TripPicker';
 import AppointmentsPanel from './AppointmentsPanel';
 import DocumentsTab from './DocumentsTab';
+import ExceptionsTab from './ExceptionsTab';
+import { fetchExceptions, openExceptions } from '../data/tms/exceptionsStore';
 import { legsFor, missingForLegs, legTrucks, syncLegCells, seatName, driverNamesOf } from '../data/tms/assignmentsStore';
 import type { LoadAssignment } from '../data/tms/types';
 
@@ -29,7 +31,7 @@ import type { LoadAssignment } from '../data/tms/types';
 
 const STATUSES = ['unassigned', 'open', 'covered', 'dispatched', 'at yard', 'at shipper', 'en route', 'at receiver', 'delivered', 'completed', 'off'];
 
-type Tab = 'info' | 'stops' | 'milestones' | 'docs' | 'dispatch';
+type Tab = 'info' | 'stops' | 'milestones' | 'docs' | 'exceptions' | 'dispatch';
 
 export default function LoadDetailModal({ tractor, date, assignment, canDel, initialTab, warning, newLoad, seedLoad, onSave, onClear, onCreated, onClose }: {
   tractor: string; date: string; assignment?: Assignment; canDel: boolean; initialTab?: Tab; warning?: string;
@@ -72,6 +74,11 @@ export default function LoadDetailModal({ tractor, date, assignment, canDel, ini
 
   /* the shell rules (route, customer, equipment, stops) plus every leg's own */
   const missing = [...missingForDispatch(l), ...missingForLegs(legs)];
+
+  /* Phase 5 — an open exception is loud on the tab, so nobody has to open the
+     tab to find out something went wrong. */
+  useEffect(() => { void fetchExceptions(l.id); }, [l.id]);
+  const openExc = openExceptions(l.id).length;
 
   /* rate-con drop → parse → apply as a highlighted, must-verify suggestion */
   async function onRateCon(file: File) {
@@ -143,7 +150,7 @@ export default function LoadDetailModal({ tractor, date, assignment, canDel, ini
 
         {/* tabs */}
         <div className="load-tabs">
-          {([['info', 'Load Info'], ['stops', l.segments.length ? `Stops · ✂${l.segments.length}` : 'Stops'], ['milestones', 'Milestones'], ['docs', 'Documents'], ['dispatch', 'Dispatch']] as [Tab, string][]).map(([k, lab]) => (
+          {([['info', 'Load Info'], ['stops', l.segments.length ? `Stops · ✂${l.segments.length}` : 'Stops'], ['milestones', 'Milestones'], ['docs', 'Documents'], ['exceptions', openExc > 0 ? `Exceptions · ⚠${openExc}` : 'Exceptions'], ['dispatch', 'Dispatch']] as [Tab, string][]).map(([k, lab]) => (
             <button key={k} className={`load-tab ${tab === k ? 'on' : ''}`} onClick={() => setTab(k)}>{lab}</button>
           ))}
         </div>
@@ -169,6 +176,7 @@ export default function LoadDetailModal({ tractor, date, assignment, canDel, ini
         {tab === 'stops' && <StopsTab l={l} setL={setL} persist={persist} />}
         {tab === 'milestones' && <MilestonesTab load={l} onStatus={() => setL((p) => ({ ...p }))} />}
         {tab === 'docs' && <DocumentsTab load={l} onLoad={(n) => setL(n)} />}
+        {tab === 'exceptions' && <ExceptionsTab load={l} onOpenLoad={(n) => setL(n)} />}
         {tab === 'dispatch' && (
           <DispatchTab l={l} legs={legs} missing={missing} flash={setNotice}
             onDispatched={async (sendTo) => {

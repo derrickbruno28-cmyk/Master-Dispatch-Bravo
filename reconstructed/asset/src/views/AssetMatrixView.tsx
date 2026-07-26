@@ -51,8 +51,9 @@ const DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
    MISSING BOL / MISSING POD deliberately only count DELIVERED loads. A load that
    hasn't run yet is missing its paperwork by definition — counting those would
    make the chip read "47" every morning and mean nothing. */
-type BillChip = 'MISSING_BOL' | 'MISSING_POD' | 'READY_FOR_ACCOUNTING' | 'ON_HOLD' | 'CANCELLED_TONU';
+type BillChip = 'EXCEPTION' | 'MISSING_BOL' | 'MISSING_POD' | 'READY_FOR_ACCOUNTING' | 'ON_HOLD' | 'CANCELLED_TONU';
 const BILL_CHIPS: { key: BillChip; label: string; title: string }[] = [
+  { key: 'EXCEPTION', label: '⚠ Exception', title: 'Loads with an open exception — something stopped the plan and it has not been resolved' },
   { key: 'MISSING_BOL', label: '📄 Missing BOL', title: 'Delivered loads with no BOL attached — these cannot go to accounting' },
   { key: 'MISSING_POD', label: '📄 Missing POD', title: 'Delivered loads with no POD attached — these cannot go to accounting' },
   { key: 'READY_FOR_ACCOUNTING', label: '✅ Ready for accounting', title: 'BOL and POD are both in — ready to invoice' },
@@ -65,6 +66,7 @@ const DELIVERED_STATES = ['delivered', 'completed'];
 function billChipsFor(l: Load): BillChip[] {
   const t = l as unknown as Partial<TmsLoad>;
   const out: BillChip[] = [];
+  if (t.hasOpenException) out.push('EXCEPTION');
   const delivered = DELIVERED_STATES.includes((l.status || '').toLowerCase());
   /* the load's own derived flags are the fast path (that's why they live on the
      load at all); the documents cache is the fallback for a load the flags
@@ -180,7 +182,7 @@ export default function AssetMatrixView() {
      whole database) is what keeps the number and the fading in agreement. */
   const billIndex = useMemo(() => {
     const counts: Record<BillChip, number> = {
-      MISSING_BOL: 0, MISSING_POD: 0, READY_FOR_ACCOUNTING: 0, ON_HOLD: 0, CANCELLED_TONU: 0,
+      EXCEPTION: 0, MISSING_BOL: 0, MISSING_POD: 0, READY_FOR_ACCOUNTING: 0, ON_HOLD: 0, CANCELLED_TONU: 0,
     };
     const match = new Set<string>();
     const seen = new Set<string>();
@@ -626,6 +628,9 @@ function TerminalRows({ term, trucks, dates, assign, setEditing, openDispatch, l
                                 <FastLog load={ld} onClose={() => setFastLog(null)} onLogged={() => setFastLog(null)} />
                               )}
                             </span>
+                          )}
+                          {(ld as unknown as { hasOpenException?: boolean } | undefined)?.hasOpenException && (
+                            <span className="am-excbadge" title="Open exception — open the load and read the Exceptions tab">⚠</span>
                           )}
                           {dc > 0 && <span className="am-docbadge" title={`${dc} document${dc > 1 ? 's' : ''}`}>📎{dc}</span>}
                           {ld?.dispatchedAt && <span className="am-sentbadge" title="Dispatched — flyer sent">⚡sent</span>}
