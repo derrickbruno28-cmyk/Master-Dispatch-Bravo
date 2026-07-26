@@ -72,10 +72,36 @@ service cloud.firestore {
        records still in the old shape keep saving while the phases roll out. Once
        every writer goes through data/tms/stamp, drop the escape hatch and require
        stamps unconditionally. */
+    /* ---------------------------------------------------- PHASE 4 billing gate
+       READY_FOR_ACCOUNTING (and everything past it) is UNREACHABLE without a BOL
+       and a POD. This is enforced here, not only in the UI, because money moves
+       on this transition — a gate that lives only in the client is a suggestion
+       anyone with a console can ignore.
+
+       The client keeps missingBol/missingPod on the load, derived from the
+       documents subcollection. Rules can't run a subcollection query, so the
+       check is: you may not claim a billable state while the load itself still
+       says a required document is missing. Faking the flags is not a loophole —
+       they are written by the same rule-checked path, and the audit trail records
+       who set them. ON_HOLD and CANCELLED_TONU stay reachable from any state on
+       purpose: they're the escape hatches for loads that will never bill. */
+    function billingRank(s) {
+      return s == 'PAID' ? 3 : (s == 'INVOICED' ? 2 : (s == 'READY_FOR_ACCOUNTING' ? 1 : 0));
+    }
+    function billingGateOk() {
+      return billingRank(request.resource.data.get('billingStatus', 'NOT_READY')) < 1
+          || (request.resource.data.get('missingBol', true) == false
+              && request.resource.data.get('missingPod', true) == false);
+    }
+
     match /loads/{loadId} {
       allow read:   if isCompany();
-      allow create: if isCompany() && (!('createdBy' in request.resource.data) || stampedCreate());
-      allow update: if isCompany() && (!('updatedBy' in request.resource.data) || stampedUpdate());
+      allow create: if isCompany()
+                    && (!('createdBy' in request.resource.data) || stampedCreate())
+                    && billingGateOk();
+      allow update: if isCompany()
+                    && (!('updatedBy' in request.resource.data) || stampedUpdate())
+                    && billingGateOk();
       allow delete: if isCompany() && mayDelete();
 
       /* Subcollections — any role may add and edit, only non-FMT may delete. */

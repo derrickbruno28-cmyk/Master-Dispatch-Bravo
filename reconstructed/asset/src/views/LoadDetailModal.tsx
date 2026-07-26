@@ -10,7 +10,6 @@ import { loadCustomers, ensureCustomer, EQUIPMENT_TYPES } from '../data/customer
 import { loadFleet, saveTruck } from '../data/fleetStore';
 import { loadTrailers } from '../data/trailersStore';
 import { listAddresses } from '../data/addressStore';
-import { documentStore, type LoadDocument } from '../integrations/documents';
 import { routingProvider } from '../integrations/routing';
 import { rateConParser, applyRateCon } from '../integrations/ratecon';
 import { LOAD_STATUS_LABEL, type Assignment } from '../data/schedule';
@@ -18,6 +17,7 @@ import AssignmentsSection from './AssignmentsSection';
 import MilestonesTab from './MilestonesTab';
 import TripPicker from './TripPicker';
 import AppointmentsPanel from './AppointmentsPanel';
+import DocumentsTab from './DocumentsTab';
 import { legsFor, missingForLegs, legTrucks, syncLegCells, seatName, driverNamesOf } from '../data/tms/assignmentsStore';
 import type { LoadAssignment } from '../data/tms/types';
 
@@ -168,7 +168,7 @@ export default function LoadDetailModal({ tractor, date, assignment, canDel, ini
         {tab === 'info' && <InfoTab l={l} f={f} onLegs={onLegs} canDel={canDel} assignable={!!(newLoad || seedLoad)} autoFilled={autoFilled} onRateCon={onRateCon} onNotice={setNotice} onClear={() => { clearLoadCell(tractor, date); onClear(); }} />}
         {tab === 'stops' && <StopsTab l={l} setL={setL} persist={persist} />}
         {tab === 'milestones' && <MilestonesTab load={l} onStatus={() => setL((p) => ({ ...p }))} />}
-        {tab === 'docs' && <DocsTab loadId={l.id} />}
+        {tab === 'docs' && <DocumentsTab load={l} onLoad={(n) => setL(n)} />}
         {tab === 'dispatch' && (
           <DispatchTab l={l} legs={legs} missing={missing} flash={setNotice}
             onDispatched={async (sendTo) => {
@@ -466,79 +466,6 @@ function StopsTab({ l, setL, persist }: { l: Load; setL: React.Dispatch<React.Se
       {/* PHASE 3: the appointment WINDOW lives on the stops subcollection — it's
           what gives At Risk something to measure against. */}
       <AppointmentsPanel load={l} />
-    </div>
-  );
-}
-
-/* ---------------- Documents ---------------- */
-function DocsTab({ loadId }: { loadId: string }) {
-  const store = documentStore();
-  const [docs, setDocs] = useState<LoadDocument[]>([]);
-  const [confirmDel, setConfirmDel] = useState<string | null>(null);
-  const [renaming, setRenaming] = useState<string | null>(null);
-  const [name, setName] = useState('');
-  const [drag, setDrag] = useState(false);
-  const fileRef = useRef<HTMLInputElement>(null);
-  const refresh = () => { void store.list(loadId).then(setDocs); };
-  useEffect(refresh, [loadId]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  async function addFiles(files: FileList | null) {
-    if (!files) return;
-    for (const fl of Array.from(files)) await store.put(loadId, fl);
-    refresh();
-  }
-  async function view(id: string) {
-    const b = await store.data(id); if (!b) return;
-    window.open(URL.createObjectURL(b), '_blank');
-  }
-  async function download(d: LoadDocument) {
-    const b = await store.data(d.id); if (!b) return;
-    const a = document.createElement('a'); a.href = URL.createObjectURL(b); a.download = d.name; a.click();
-  }
-  return (
-    <div>
-      <div className="load-docs-head">
-        <span className="load-storage-badge">🗄 {store.label}</span>
-        <label className="am-save" style={{ cursor: 'pointer' }}>⭳ Upload document
-          <input ref={fileRef} type="file" multiple style={{ display: 'none' }} onChange={(e) => addFiles(e.target.files)} />
-        </label>
-      </div>
-      <div className={`load-dropzone ${drag ? 'on' : ''}`}
-        onDragOver={(e) => { e.preventDefault(); setDrag(true); }}
-        onDragLeave={() => setDrag(false)}
-        onDrop={(e) => { e.preventDefault(); setDrag(false); void addFiles(e.dataTransfer.files); }}>
-        Drag & drop rate cons, BOLs, PODs here
-      </div>
-      <table className="am-grid am-fleet load-docs-table">
-        <thead><tr><th>Name</th><th>Type</th><th>Uploaded</th><th>Actions</th></tr></thead>
-        <tbody>
-          {docs.length === 0 && <tr><td colSpan={4} className="am-muted" style={{ textAlign: 'center', padding: 12 }}>No documents yet.</td></tr>}
-          {docs.map((d) => (
-            <tr key={d.id}>
-              <td>{renaming === d.id
-                ? <span style={{ display: 'flex', gap: 6 }}>
-                    <input className="am-input" value={name} onChange={(e) => setName(e.target.value)} />
-                    <button className="am-save" onClick={async () => { await store.rename(d.id, name); setRenaming(null); refresh(); }}>✓</button>
-                  </span>
-                : d.name}</td>
-              <td className="am-muted">{d.type.split('/').pop()}</td>
-              <td className="am-muted">{d.uploadedAt.slice(0, 16).replace('T', ' ')}</td>
-              <td className="fleet-actions">
-                {confirmDel === d.id
-                  ? <><span className="am-muted">To trash?</span>
-                      <button className="fleet-del" onClick={async () => { await store.softDelete(d.id); setConfirmDel(null); refresh(); }}>✓</button>
-                      <button className="am-clear" onClick={() => setConfirmDel(null)}>✕</button></>
-                  : <>
-                      <button className="am-clear" onClick={() => view(d.id)}>View</button>
-                      <button className="am-clear" onClick={() => { setRenaming(d.id); setName(d.name); }}>Rename</button>
-                      <button className="am-clear" onClick={() => download(d)}>⭳</button>
-                      <button className="fleet-del" onClick={() => setConfirmDel(d.id)}>🗑</button>
-                    </>}
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
     </div>
   );
 }

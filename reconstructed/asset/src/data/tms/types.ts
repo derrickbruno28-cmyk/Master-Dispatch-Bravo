@@ -264,6 +264,14 @@ export interface TmsLoad extends Partial<Omit<LegacyLoad, 'weight'>> {
   statusManualOverride: boolean;  // …unless a human forced it
   billingStatus: BillingStatus;
 
+  /* PHASE 4 — derived from the documents subcollection, kept ON the load so the
+     board can filter without opening a subcollection per cell AND so
+     firestore.rules can gate READY_FOR_ACCOUNTING (rules cannot run a
+     subcollection query). Never edited by hand: documentsStore.refreshDocFlags
+     rewrites both on every document change. */
+  missingBol: boolean;
+  missingPod: boolean;
+
   equipment: string;
   weight: number | null;
   commodity: string;
@@ -464,6 +472,7 @@ export function blankTmsLoad(id: string, init?: Partial<TmsLoad>): TmsLoad {
     routeName: '', routeNumber: '', tripNumbers: [],
     customer: '', bookingAuthority: '', bookingTerminal: '',
     status: 'unassigned', statusManualOverride: false, billingStatus: 'NOT_READY',
+    missingBol: true, missingPod: true,
     equipment: '', weight: null, commodity: '', isUspsContract: false,
     refs: blankRefs(), financials: blankFinancials(),
     dispatchNotes: '', parentLoadId: '', lock: blankLock(), lastLateReason: '',

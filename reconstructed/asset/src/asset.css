@@ -992,3 +992,54 @@
 .repo-row { cursor: pointer; }
 .repo-row:hover { background: color-mix(in srgb, var(--accent) 7%, transparent); }
 .repo-create { white-space: nowrap; }
+
+/* ---------------------------------------------------------------- PHASE 4
+   documents + the billing gate. The gate banner is loud on purpose: it is the
+   answer to "why can't I bill this load", and it should be readable across the
+   room from the desk of whoever is chasing paperwork. */
+.docs-wrap { display: flex; flex-direction: column; gap: 11px; }
+.docs-gate { border-radius: 10px; padding: 9px 12px; font-size: 12.5px; line-height: 1.45;
+  border: 1px solid rgba(214,84,84,0.38); background: rgba(214,84,84,0.10); color: var(--red); }
+.docs-gate.ok { border-color: rgba(46,160,67,0.35); background: rgba(46,160,67,0.10); color: var(--green); }
+.docs-gate .am-muted { color: var(--muted); font-weight: 500; }
+.docs-billing { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.docs-billing .am-input { max-width: 220px; }
+.docs-billing .am-muted { font-size: 11.5px; max-width: 520px; }
+.docs-upload { display: flex; align-items: flex-end; gap: 12px; flex-wrap: wrap; }
+.docs-type { min-width: 210px; }
+.docs-drop { flex: 1 1 320px; margin-bottom: 0; }
+.docs-scroll { overflow-x: auto; }
+.docs-table { font-size: 11.5px; min-width: 940px; }
+.docs-table td, .docs-table th { padding: 4px 6px; vertical-align: top; }
+.docs-type-pill { font-size: 9.5px; font-weight: 800; letter-spacing: .03em; padding: 2px 6px;
+  border-radius: 5px; background: var(--panel-2); border: 1px solid var(--border); color: var(--muted); white-space: nowrap; }
+.docs-type-pill.req { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 45%, var(--border)); }
+.docs-name { font-weight: 600; word-break: break-all; max-width: 230px; }
+.docs-in { padding: 2px 5px; font-size: 11.5px; max-width: 150px; }
+.docs-days { font-size: 10px; margin-top: 2px; }
+.docs-days.expired { color: var(--red); font-weight: 700; }
+.docs-when { font-size: 10.5px; line-height: 1.35; }
+
+/* the paperwork chip row on the board */
+.am-billchips { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; margin-top: 8px; }
+.am-billchip { display: inline-flex; align-items: center; gap: 6px; cursor: pointer;
+  font-size: 11px; font-weight: 700; padding: 3px 9px; border-radius: 999px;
+  border: 1px solid var(--border); background: var(--panel-2); color: var(--muted); }
+.am-billchip:hover { border-color: color-mix(in srgb, var(--accent) 50%, var(--border)); color: var(--text); }
+.am-billchip.zero { opacity: .55; }
+.am-billcount { font-size: 10px; font-weight: 800; min-width: 15px; text-align: center;
+  padding: 0 4px; border-radius: 999px; background: var(--panel); border: 1px solid var(--border); }
+.am-billchip.missing_bol.on, .am-billchip.missing_pod.on {
+  color: var(--red); border-color: rgba(214,84,84,0.55); background: rgba(214,84,84,0.12); }
+.am-billchip.ready_for_accounting.on {
+  color: var(--green); border-color: rgba(46,160,67,0.55); background: rgba(46,160,67,0.12); }
+.am-billchip.on_hold.on {
+  color: var(--amber); border-color: rgba(224,160,61,0.55); background: rgba(224,160,61,0.12); }
+.am-billchip.cancelled_tonu.on {
+  color: var(--text); border-color: var(--muted); background: color-mix(in srgb, var(--muted) 18%, transparent); }
+.am-billclear { font-size: 11px; }
+
+/* a chip never hides a load — it fades what doesn't match, so the board keeps
+   its shape and you can still see which trucks are working. */
+.am-cell-faded { opacity: .18; filter: grayscale(0.65); transition: opacity .12s ease; }
+.am-cell-faded:hover { opacity: .6; }

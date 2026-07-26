@@ -9,6 +9,8 @@ import {
 } from '../data/schedule';
 import { canDelete, canApproveSoloOverride } from '../data/permStore';
 import FastLog from './FastLog';
+import { missingBol, missingPod } from '../data/tms/documentsStore';
+import type { TmsLoad } from '../data/tms/types';
 import LoadDetailModal from './LoadDetailModal';
 import { loadAll, moveLoadCell, clearLoadCell, type Load } from '../data/loadsStore';
 import { documentStore } from '../integrations/documents';
@@ -40,6 +42,41 @@ const STATUS_LABEL: Record<string, string> = {
 
 const DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
+/* PHASE 4 — the paperwork chip row.
+   These are the five things the person chasing documents actually looks for, and
+   they mirror LoadStop's chip row. A chip never hides a load: it FADES everything
+   that doesn't match, so the board keeps its shape and you can still see the truck
+   is working. Clicking the active chip again clears the filter.
+
+   MISSING BOL / MISSING POD deliberately only count DELIVERED loads. A load that
+   hasn't run yet is missing its paperwork by definition — counting those would
+   make the chip read "47" every morning and mean nothing. */
+type BillChip = 'MISSING_BOL' | 'MISSING_POD' | 'READY_FOR_ACCOUNTING' | 'ON_HOLD' | 'CANCELLED_TONU';
+const BILL_CHIPS: { key: BillChip; label: string; title: string }[] = [
+  { key: 'MISSING_BOL', label: '📄 Missing BOL', title: 'Delivered loads with no BOL attached — these cannot go to accounting' },
+  { key: 'MISSING_POD', label: '📄 Missing POD', title: 'Delivered loads with no POD attached — these cannot go to accounting' },
+  { key: 'READY_FOR_ACCOUNTING', label: '✅ Ready for accounting', title: 'BOL and POD are both in — ready to invoice' },
+  { key: 'ON_HOLD', label: '⏸ On hold', title: 'Billing paused on purpose' },
+  { key: 'CANCELLED_TONU', label: '🚫 Cancelled / TONU', title: 'Cancelled or truck-ordered-not-used — will not bill normally' },
+];
+
+const DELIVERED_STATES = ['delivered', 'completed'];
+
+function billChipsFor(l: Load): BillChip[] {
+  const t = l as unknown as Partial<TmsLoad>;
+  const out: BillChip[] = [];
+  const delivered = DELIVERED_STATES.includes((l.status || '').toLowerCase());
+  /* the load's own derived flags are the fast path (that's why they live on the
+     load at all); the documents cache is the fallback for a load the flags
+     haven't been written to yet */
+  if (delivered && (t.missingBol ?? missingBol(l.id))) out.push('MISSING_BOL');
+  if (delivered && (t.missingPod ?? missingPod(l.id))) out.push('MISSING_POD');
+  if (t.billingStatus === 'READY_FOR_ACCOUNTING') out.push('READY_FOR_ACCOUNTING');
+  if (t.billingStatus === 'ON_HOLD') out.push('ON_HOLD');
+  if (t.billingStatus === 'CANCELLED_TONU') out.push('CANCELLED_TONU');
+  return out;
+}
+
 /* "SAN ANTONIO" → "San Antonio" for the suggestion popover */
 function cityTitle(s: string): string {
   return (s || '').toLowerCase().replace(/\b\w/g, (c) => c.toUpperCase());
@@ -55,6 +92,7 @@ export default function AssetMatrixView() {
   const [placing, setPlacing] = useState<Load | null>(null);   // an unassigned load being placed on the board
   const [loadsTick, setLoadsTick] = useState(0);               // bump to recompute load-derived views
   const [docCounts, setDocCounts] = useState<Record<string, number>>({});
+  const [billFilter, setBillFilter] = useState<BillChip | ''>('');
   const [termFilter, setTermFilter] = useState<string>('ALL');
   const [posFilter, setPosFilter] = useState<string>('ALL');
   const [confirmClear, setConfirmClear] = useState<string | null>(null);
@@ -116,8 +154,12 @@ export default function AssetMatrixView() {
       else for (const s of l.segments) m.set(cellKey(s.assignedTruck, l.date), l);
     }
     return m;
+    /* loadsTick belongs here: the map holds LOAD OBJECTS, so anything that edits
+       a load without touching the board cell (billing status, document flags,
+       milestones) has to rebuild it — otherwise the paperwork chips count a
+       stale copy and disagree with the load modal that just changed it. */
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [assign, fleet]);
+  }, [assign, fleet, loadsTick]);
   useEffect(() => { void documentStore().countByLoad().then(setDocCounts); }, [assign, editing]);
 
   /* transient inline notice — replaces window.alert (blocked in sandboxes) */
@@ -132,6 +174,36 @@ export default function AssetMatrixView() {
     [dates, assign, termFilter],
   );
   const weekTotal = dayCounts.reduce((a, b) => a + b, 0);
+
+  /* PHASE 4 — chip counts over the loads on THIS week's board, and the set of
+     load ids the active chip matches. Counting the visible week (rather than the
+     whole database) is what keeps the number and the fading in agreement. */
+  const billIndex = useMemo(() => {
+    const counts: Record<BillChip, number> = {
+      MISSING_BOL: 0, MISSING_POD: 0, READY_FOR_ACCOUNTING: 0, ON_HOLD: 0, CANCELLED_TONU: 0,
+    };
+    const match = new Set<string>();
+    const seen = new Set<string>();
+    for (const l of loadsByCell.values()) {
+      if (seen.has(l.id) || !dates.includes(l.date)) continue;
+      seen.add(l.id);
+      const chips = billChipsFor(l);
+      for (const c of chips) counts[c] += 1;
+      if (billFilter && chips.includes(billFilter)) match.add(l.id);
+    }
+    return { counts, match };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loadsByCell, dates, billFilter, docCounts, loadsTick]);
+
+  /* a cell fades when a chip is active and the load in it isn't in the match set.
+     Empty cells fade too — otherwise the "+" boxes stay bright and pull the eye
+     away from the loads you asked to see. */
+  const cellFaded = (k: string): boolean => {
+    if (!billFilter) return false;
+    const l = loadsByCell.get(k);
+    return !l || !billIndex.match.has(l.id);
+  };
+
 
   /* driver name → position (from the Master Drivers List), so we can filter the
      matrix by position / hero teams without cluttering the board */
@@ -225,6 +297,28 @@ export default function AssetMatrixView() {
             ))}
           </div>
         )}
+        {/* PHASE 4 paperwork chips — the billing work queue, on the board */}
+        <div className="am-billchips">
+          {BILL_CHIPS.map((c) => {
+            const n = billIndex.counts[c.key];
+            const on = billFilter === c.key;
+            return (
+              <button
+                key={c.key}
+                className={`am-billchip ${c.key.toLowerCase()} ${on ? 'on' : ''} ${n === 0 ? 'zero' : ''}`}
+                title={`${c.title}. Click to fade everything else on this week's board.`}
+                onClick={() => setBillFilter(on ? '' : c.key)}
+              >
+                {c.label}<span className="am-billcount">{n}</span>
+              </button>
+            );
+          })}
+          {billFilter && (
+            <button className="am-clear am-billclear" onClick={() => setBillFilter('')}>
+              ✕ Clear paperwork filter
+            </button>
+          )}
+        </div>
         <div className="am-legend">
           {STATUSES.map((s) => (
             <span key={s} className="am-legend-item">
@@ -266,6 +360,7 @@ export default function AssetMatrixView() {
                 openDispatch={(k) => { setEditing(k); setEditTab('dispatch'); }}
                 loads={loadsByCell}
                 docCounts={docCounts}
+                cellFaded={cellFaded}
                 save={save}
                 move={move}
                 confirmClear={confirmClear}
@@ -373,11 +468,12 @@ function AddTeamModal({ onClose, onAdded }: { onClose: () => void; onAdded: (tra
   );
 }
 
-function TerminalRows({ term, trucks, dates, assign, setEditing, openDispatch, loads, docCounts, save, move, confirmClear, setConfirmClear, flash, canDel, oos, hosByTruck, sugCell, setSugCell, advanceWeek, driverPos }: {
+function TerminalRows({ term, trucks, dates, assign, setEditing, openDispatch, loads, docCounts, cellFaded, save, move, confirmClear, setConfirmClear, flash, canDel, oos, hosByTruck, sugCell, setSugCell, advanceWeek, driverPos }: {
   term: string; trucks: FleetTruck[]; dates: string[];
   assign: Record<string, Assignment>;
   setEditing: (k: string) => void; openDispatch: (k: string) => void;
   loads: Map<string, Load>; docCounts: Record<string, number>;
+  cellFaded: (k: string) => boolean;
   save: (k: string, a: Assignment) => void;
   move: (fromKey: string, toKey: string) => void;
   confirmClear: string | null; setConfirmClear: (k: string | null) => void;
@@ -482,7 +578,7 @@ function TerminalRows({ term, trucks, dates, assign, setEditing, openDispatch, l
             return (
               <td
                 key={d}
-                className={`am-cell${outOfService ? ' am-cell-oos' : ''}`}
+                className={`am-cell${outOfService ? ' am-cell-oos' : ''}${cellFaded(k) ? ' am-cell-faded' : ''}`}
                 onClick={() => {
                   if (outOfService) { flash(`Truck #${t.tractor} is OUT OF SERVICE (Fleetio) — clear it on the Out of Service page to assign.`); return; }
                   if (down) { flash(`Team #${t.tractor} is in SHUTDOWN — cannot assign a route.`); return; }
