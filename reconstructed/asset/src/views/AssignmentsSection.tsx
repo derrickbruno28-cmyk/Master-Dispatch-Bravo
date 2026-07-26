@@ -12,6 +12,7 @@
    - Legs renumber themselves. legIndex is positional, so removing leg 2 of 3
      leaves 1 and 2, never a gap. */
 
+import TrailerCombo from './TrailerCombo';
 import { useEffect, useMemo, useState } from 'react';
 import type { Load } from '../data/loadsStore';
 import { loadFleet } from '../data/fleetStore';
@@ -113,9 +114,8 @@ export default function AssignmentsSection({ load, onChanged }: {
                   placeholder="type a truck #" />
               </L>
               <L t="Trailer #">
-                <input className="am-input" list="leg-trailers" value={g.trailerNumber}
-                  onChange={(e) => patch(i, { trailerNumber: e.target.value })}
-                  placeholder="power-only? leave blank" />
+                <TrailerCombo value={g.trailerNumber} loadId={load.id}
+                  onChange={(v) => patch(i, { trailerNumber: v })} />
               </L>
             </div>
             {oos && (

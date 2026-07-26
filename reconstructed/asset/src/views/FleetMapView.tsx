@@ -4,7 +4,7 @@ import 'maplibre-gl/dist/maplibre-gl.css';
 import { loadFleet } from '../data/fleetStore';
 import { onChange } from '../data/bus';
 import { fleetioClient, localOosList, type VehicleService } from '../integrations/telematics';
-import { samsara, importedGeofences, addImportedGeofences, saveImportedGeofences, type TruckGps, type Geofence } from '../integrations/samsara';
+import { samsara, importedGeofences, addImportedGeofences, saveImportedGeofences, type TruckGps, type Geofence, connectedOrgCount } from '../integrations/samsara';
 import { weatherProvider, trafficProvider, type Congestion } from '../integrations/mapdata';
 import { baseStyles, styleFor, maptilerKey } from '../integrations/mapstyle';
 
@@ -246,7 +246,11 @@ export default function FleetMapView() {
         <h2>Fleet Map <span className="am-muted" style={{ fontWeight: 400, fontSize: 13 }}>· live GPS</span></h2>
         <div className="fleetmap-badges">
           <span className="intg-badge on" title={sam.label}>📡 {sam.label}</span>
-          <button className="am-save" onClick={() => setImportOpen(true)}>⬛ Import Geofences from Samsara</button>
+          {/* PHASE 10B.5 — a button that cannot work should not be clickable.
+              Zero connected orgs means there is nothing to import FROM. */}
+          <button className="am-save" disabled={connectedOrgCount() === 0}
+            title={connectedOrgCount() > 0 ? 'Import geofences from the connected Samsara org' : 'Connect a Samsara org on Integrations first'}
+            onClick={() => setImportOpen(true)}>⬛ Import Geofences from Samsara</button>
         </div>
       </div>
 
@@ -268,7 +272,10 @@ export default function FleetMapView() {
           <div className="fmap-ctl-divider" />
           <label className="fmap-ctl-row"><input type="checkbox" checked={layers.weather} onChange={(e) => setLayers((l) => ({ ...l, weather: e.target.checked }))} /> Weather (national)</label>
           <label className="fmap-ctl-row"><input type="checkbox" checked={layers.traffic} onChange={(e) => setLayers((l) => ({ ...l, traffic: e.target.checked }))} /> Traffic</label>
-          <label className="fmap-ctl-row"><input type="checkbox" checked={layers.geofences} onChange={(e) => setLayers((l) => ({ ...l, geofences: e.target.checked }))} /> Geofences ({geos.length})</label>
+          <label className={`fmap-ctl-row ${geos.length === 0 ? 'fmap-ctl-off' : ''}`}
+            title={geos.length === 0 ? 'No geofences yet — connect a Samsara org on Integrations and import them' : ''}>
+            <input type="checkbox" disabled={geos.length === 0} checked={layers.geofences}
+              onChange={(e) => setLayers((l) => ({ ...l, geofences: e.target.checked }))} /> Geofences ({geos.length})</label>
         </div>
 
         {/* legend */}

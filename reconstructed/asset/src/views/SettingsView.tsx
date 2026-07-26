@@ -4,11 +4,9 @@ import { FLEETIO_UNITS } from '../data/fleetUnits';
 import { maptilerKey, setMaptilerKey, maptilerMasked } from '../integrations/mapstyle';
 import { onChange, emitChange } from '../data/bus';
 import { firebaseEnabled } from '../firebase';
-import { hasLocalData, localCounts, restoreLocalToShared } from '../data/recoverLocal';
 import { runDiagnostics, type Diag } from '../data/diagnostics';
 import { refreshDriversFromShared } from '../data/driversStore';
-import { refreshFleetFromShared, resetFleetToBare } from '../data/fleetStore';
-import { clearAllAssignments } from '../data/schedule';
+import { refreshFleetFromShared } from '../data/fleetStore';
 import { isOwner } from '../data/permStore';
 import MigrationCard from './MigrationCard';
 
@@ -37,23 +35,6 @@ export default function SettingsView() {
   function saveMt() { setMaptilerKey(mtDraft); setMtDraft(''); emitChange(); }
   function clearMt() { setMaptilerKey(''); setMtDraft(''); emitChange(); }
 
-  const [restoring, setRestoring] = useState(false);
-  const [restoreMsg, setRestoreMsg] = useState('');
-  const counts = localCounts();
-
-  /* owner-only: reset the shared live board — clears the calendar + restores a
-     bare fleet (fixes leftover Dallas/OTR-Team fillers + stuck loads on live) */
-  const [confirmReset, setConfirmReset] = useState(false);
-  const [resetting, setResetting] = useState(false);
-  const [resetMsg, setResetMsg] = useState('');
-  async function doReset() {
-    setResetting(true); setResetMsg('');
-    const loads = await clearAllAssignments();
-    const trucks = await resetFleetToBare();
-    setResetting(false); setConfirmReset(false);
-    setResetMsg(`✓ Board reset — cleared ${loads} calendar load${loads === 1 ? '' : 's'} and restored ${trucks} bare trucks (tractor + make only, no drivers/terminal/status). Refresh and the board will match a clean fleet.`);
-  }
-
   /* Fleetio is disconnected (integrations/config FLEETIO_CONNECTED) — no live
      toggle and no connectivity test; the fleet is managed inside the app. */
 
@@ -69,13 +50,6 @@ export default function SettingsView() {
     setReloadMsg(`↻ Pulled ${d} drivers and ${f} trucks from the shared database into this screen.`);
     void checkSync();
   }
-  async function doRestore() {
-    setRestoring(true); setRestoreMsg('');
-    const res = await restoreLocalToShared();
-    setRestoring(false);
-    setRestoreMsg(`✓ Restored ${res.drivers} driver${res.drivers === 1 ? '' : 's'} and ${res.fleet} truck${res.fleet === 1 ? '' : 's'} from this device to the shared team roster. Everyone will see them now.`);
-  }
-
   return (
     <div className="am-page">
       <div className="am-head"><h2>Integrations</h2></div>
@@ -87,44 +61,19 @@ export default function SettingsView() {
       {/* owner-only: Phase 0 TMS schema migration (plans first, writes only after review) */}
       <MigrationCard />
 
-      {/* owner-only: one-time reset of the shared LIVE board (Firestore data) */}
+      {/* PHASE 10B.2 — "Reset the board" and "Restore this device's data" have
+          moved to the hidden owner-only Admin page (open #admin in the address
+          bar). They are one-time migration tools with destructive reach, and a
+          permanent settings page is the wrong place to keep a loaded gun. */}
       {isOwner() && (
-        <div className="intg-card" style={{ borderColor: 'var(--red)' }}>
+        <div className="intg-card">
           <div className="intg-card-head">
-            <div className="intg-card-title">🧹 Reset the board to a clean fleet <span className="intg-card-sub">owner only</span></div>
+            <div className="intg-card-title">🛠 One-time migration tools <span className="intg-card-sub">owner only</span></div>
           </div>
           <p className="am-muted" style={{ fontSize: 12.5, maxWidth: 760 }}>
-            Wipes the <b>calendar</b> and restores every truck to a <b>bare profile</b> (just the tractor # + make — no drivers,
-            terminal, type, or status). Use this once to fix the <b>live</b> board if it still shows leftover
-            <b> Dallas / OTR&nbsp;Team</b> fillers or <b>stuck loads</b> from the earlier seed. This changes the shared data everyone sees.
+            Board reset and device-data restore now live on the hidden Admin page — add
+            <b> #admin</b> to the address bar. Both ask you to type a confirmation phrase first.
           </p>
-          {confirmReset ? (
-            <div className="am-lockbtns" style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-              <button className="am-save" disabled={resetting} style={{ background: 'var(--red)', borderColor: 'var(--red)' }} onClick={doReset}>{resetting ? 'Resetting…' : '⚠ Yes — reset the board now'}</button>
-              <button className="am-clear" disabled={resetting} onClick={() => setConfirmReset(false)}>Cancel</button>
-            </div>
-          ) : (
-            <button className="am-clear" onClick={() => setConfirmReset(true)}>🧹 Reset board…</button>
-          )}
-          {resetMsg && <div className="am-notice" style={{ color: 'var(--green)', marginTop: 8 }}>{resetMsg}</div>}
-        </div>
-      )}
-
-      {/* recover data saved on this device before shared sync existed */}
-      {firebaseEnabled && hasLocalData() && (
-        <div className="intg-card" style={{ borderColor: 'var(--amber)' }}>
-          <div className="intg-card-head">
-            <div className="intg-card-title">🛟 Restore this device's data to the team</div>
-          </div>
-          <p className="am-muted" style={{ fontSize: 12.5, maxWidth: 720 }}>
-            This device has <b>{counts.drivers} drivers</b> and <b>{counts.fleet} trucks</b> saved from before the app shared data across the team.
-            If your Driver Availability or Fleet Status edits went missing after an update, click below on <b>the device where you made those edits</b> to
-            push them into the shared roster for everyone. It only adds/updates — it never deletes anyone.
-          </p>
-          <div className="am-lockbtns">
-            <button className="am-save" disabled={restoring} onClick={doRestore}>{restoring ? 'Restoring…' : '🛟 Restore to shared roster'}</button>
-          </div>
-          {restoreMsg && <div className="am-notice" style={{ color: 'var(--green)', marginTop: 8 }}>{restoreMsg}</div>}
         </div>
       )}
 

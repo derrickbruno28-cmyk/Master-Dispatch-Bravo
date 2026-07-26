@@ -79,3 +79,54 @@ export function removeTrailer(number: string) {
 }
 
 export function blankTrailer(): Trailer { return norm({}); }
+
+/* CSV import — PHASE 10A. Columns: trailer #, type, status, location, notes.
+   Matching is by trailer NUMBER, so re-importing an updated list updates the
+   records you already have rather than duplicating them. Header row optional. */
+export interface TrailerImportResult { added: number; updated: number; skipped: number; errors: string[] }
+
+export function importTrailersCsv(text: string): TrailerImportResult {
+  const out: TrailerImportResult = { added: 0, updated: 0, skipped: 0, errors: [] };
+  const lines = text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+  if (lines.length === 0) return out;
+
+  const split = (line: string): string[] => {
+    const cells: string[] = []; let cur = ''; let q = false;
+    for (let i = 0; i < line.length; i++) {
+      const c = line[i];
+      if (c === '"') { if (q && line[i + 1] === '"') { cur += '"'; i++; } else q = !q; }
+      else if (c === ',' && !q) { cells.push(cur); cur = ''; }
+      else cur += c;
+    }
+    cells.push(cur);
+    return cells.map((c) => c.trim());
+  };
+
+  const first = split(lines[0]).map((c) => c.toLowerCase());
+  const hasHeader = first.some((c) => /trailer|number|type|status|location|note/.test(c));
+  const idx = {
+    number: hasHeader ? first.findIndex((c) => /trailer|number|#/.test(c)) : 0,
+    type: hasHeader ? first.findIndex((c) => /type/.test(c)) : 1,
+    status: hasHeader ? first.findIndex((c) => /status/.test(c)) : 2,
+    location: hasHeader ? first.findIndex((c) => /location|yard|city/.test(c)) : 3,
+    notes: hasHeader ? first.findIndex((c) => /note/.test(c)) : 4,
+  };
+
+  const existing = new Set(loadTrailers().map((t) => t.number.trim().toLowerCase()));
+  for (const line of lines.slice(hasHeader ? 1 : 0)) {
+    const cells = split(line);
+    const at = (i: number) => (i >= 0 && i < cells.length ? cells[i] : '');
+    const number = at(idx.number);
+    if (!number) { out.skipped += 1; continue; }
+    const known = existing.has(number.toLowerCase());
+    saveTrailer({
+      number,
+      type: at(idx.type),
+      status: at(idx.status) || 'Available',
+      location: at(idx.location),
+      notes: at(idx.notes),
+    });
+    if (known) out.updated += 1; else { out.added += 1; existing.add(number.toLowerCase()); }
+  }
+  return out;
+}

@@ -4,7 +4,6 @@ import { canDelete } from '../data/permStore';
 import { onChange } from '../data/bus';
 import { fleetioClient, localOosList, setLocalOos, type ServiceStatus } from '../integrations/telematics';
 import { emitChange } from '../data/bus';
-import { importFromFleetio } from '../data/fleetioSync';
 import { MAKE_LABEL, normMake } from '../data/truckRating';
 
 /* Trucks — the tractor roster (equipment-centric) + Fleetio unit data. Each unit
@@ -21,8 +20,6 @@ export default function TrucksView() {
   const [canDel, setCanDel] = useState<boolean>(() => canDelete());
   const [svc, setSvc] = useState<Record<string, ServiceStatus>>({});
   const [svcFilter, setSvcFilter] = useState<'all' | 'in' | 'oos'>('all');
-  const [importing, setImporting] = useState(false);
-  const [notice, setNotice] = useState('');
   const fio = fleetioClient();
 
   useEffect(() => onChange(() => { setFleet(loadFleet()); setCanDel(canDelete()); }), []);
@@ -36,14 +33,6 @@ export default function TrucksView() {
     void fio.serviceStatuses().then((list) => setSvc(Object.fromEntries(list.map((s) => [s.truck, s.status]))));
   }
   const oosCount = Object.values(svc).filter((s) => s === 'out_of_service').length;
-
-  async function runImport() {
-    setImporting(true);
-    const r = await importFromFleetio();
-    setImporting(false);
-    setNotice(`✓ Fleetio import — ${r.created} new profile${r.created === 1 ? '' : 's'} created, ${r.updated} updated from ${r.total} units.`);
-    window.setTimeout(() => setNotice(''), 5000);
-  }
 
   const isOos = (t: FleetTruck) => svc[t.tractor] === 'out_of_service';
   const rows = useMemo(() => {
@@ -66,13 +55,13 @@ export default function TrucksView() {
           <button className={`oos ${svcFilter === 'oos' ? 'on' : ''}`} onClick={() => setSvcFilter('oos')}>⛔ Out of service {oosCount}</button>
         </div>
         <span className="am-muted">{rows.length} shown</span>
-        <span className="fleet-io-badge" title="Fleetio is read-only — Asset Matrix never writes to Fleetio">🔗 {fio.label}</span>
-        <button className="am-clear" disabled={importing} title="Create a profile for every Fleetio unit + pull odometer &amp; make (read-only). Units import unrated — rate them manually." onClick={runImport}>⤓ {importing ? 'Importing…' : 'Import from Fleetio'}</button>
         <button className="am-save fleet-add" onClick={() => { setEditing(blankTruck()); setIsNew(true); }}>＋ Add Truck</button>
       </div>
-      {notice && <div className="am-notice">{notice}</div>}
       <div className="am-muted" style={{ fontSize: 11.5, margin: '2px 0 10px' }}>
-        Your fleet, imported from Fleetio. Make &amp; service refresh from Fleetio. <b>Out-of-service / in-shop units can't be assigned</b> on the Asset Matrix (in / out of service is managed right here).
+        {/* PHASE 10B.1 — Fleetio is disconnected and never called. Saying it
+            refreshes from Fleetio was a claim the app could not keep. */}
+        Your fleet is managed here. <b>Out-of-service units can't be assigned</b> on the Asset Matrix —
+        in and out of service is set on this page.
       </div>
 
       <div className="am-scroll">

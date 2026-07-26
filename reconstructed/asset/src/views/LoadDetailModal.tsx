@@ -24,7 +24,7 @@ import { onChange } from '../data/bus';
 import NotesTab from './NotesTab';
 import RateConReview from './RateConReview';
 import { financialStrip, financialsOf } from '../data/tms/financials';
-import { FSC_TYPES, type FscType, type LoadFinancials } from '../data/tms/types';
+import { FSC_TYPES, BOOKING_AUTHORITIES, BOOKING_TERMINALS, type FscType, type LoadFinancials } from '../data/tms/types';
 import { parseRateCon, type RateConProposal, type RateConPatch } from '../data/tms/rateconParse';
 import {
   fetchNotes, noteCount, lockStateOf, acquireLock, heartbeat, releaseLock,
@@ -382,9 +382,28 @@ function InfoTab({ l, f, canDel, assignable, autoFilled, onRateCon, onNotice, on
         </div>
         <div className="load-two">
           <L t="Reference / Conf #"><input className={hl('referenceNo')} value={l.referenceNo} onChange={(e) => f('referenceNo', e.target.value)} /></L>
-          <L t="Booking authority"><input className="am-input" value={l.bookingAuthority} onChange={(e) => f('bookingAuthority', e.target.value)} /></L>
+          {/* PHASE 10B.9 — five entities, not free text. A typo'd authority is a
+              load that never shows up in its own company's numbers. */}
+          <L t="Booking authority *">
+            <select className={hl('bookingAuthority')} value={l.bookingAuthority}
+              onChange={(e) => f('bookingAuthority', e.target.value)}>
+              <option value="">— pick an authority —</option>
+              {BOOKING_AUTHORITIES.map((a) => <option key={a} value={a}>{a}</option>)}
+            </select>
+          </L>
         </div>
-        <L t="Commodity"><input className={hl('commodity')} value={l.commodity} onChange={(e) => f('commodity', e.target.value)} /></L>
+        {/* PHASE 10B.10 — the board filters by terminal but the load never carried
+            one; it was being inferred from whichever truck happened to be on it. */}
+        <div className="load-two">
+          <L t="Booking terminal">
+            <select className="am-input" value={(l as unknown as { bookingTerminal?: string }).bookingTerminal ?? ''}
+              onChange={(e) => (f as unknown as (k: string, v: unknown) => void)('bookingTerminal', e.target.value)}>
+              <option value="">— pick a terminal —</option>
+              {BOOKING_TERMINALS.map((t) => <option key={t} value={t}>{t}</option>)}
+            </select>
+          </L>
+          <L t="Commodity"><input className={hl('commodity')} value={l.commodity} onChange={(e) => f('commodity', e.target.value)} /></L>
+        </div>
         <L t="Dispatch notes"><textarea className="am-input" rows={2} value={l.dispatchNotes} onChange={(e) => f('dispatchNotes', e.target.value)} /></L>
         <label className="am-usps-check"><input type="checkbox" checked={l.uspsContract} onChange={(e) => f('uspsContract', e.target.checked)} /> USPS contract route</label>
 

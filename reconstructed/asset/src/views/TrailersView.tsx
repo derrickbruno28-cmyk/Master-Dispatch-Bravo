@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from 'react';
-import { loadTrailers, saveTrailer, removeTrailer, blankTrailer, TRAILER_TYPES, TRAILER_STATUSES, type Trailer } from '../data/trailersStore';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { loadTrailers, saveTrailer, removeTrailer, blankTrailer, importTrailersCsv, TRAILER_TYPES, TRAILER_STATUSES, type Trailer } from '../data/trailersStore';
 import { canDelete } from '../data/permStore';
 import { onChange } from '../data/bus';
 
@@ -15,6 +15,10 @@ export default function TrailersView() {
   const [q, setQ] = useState('');
   const [editing, setEditing] = useState<Trailer | null>(null);
   const [isNew, setIsNew] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
+  const [csv, setCsv] = useState('');
+  const [importMsg, setImportMsg] = useState('');
+  const fileRef = useRef<HTMLInputElement>(null);
   const [confirmDel, setConfirmDel] = useState<string | null>(null);
   const [canDel, setCanDel] = useState<boolean>(() => canDelete());
 
@@ -31,8 +35,32 @@ export default function TrailersView() {
         <h2>Trailers</h2>
         <input className="am-input" style={{ maxWidth: 220 }} placeholder="Search trailer / status / location…" value={q} onChange={(e) => setQ(e.target.value)} />
         <span className="am-muted">{rows.length} of {trailers.length} trailers</span>
+        <button className="am-clear" onClick={() => setImportOpen((o) => !o)}>⭳ Import trailers (CSV)</button>
         <button className="am-save fleet-add" onClick={() => { setEditing(blankTrailer()); setIsNew(true); }}>＋ Add Trailer</button>
       </div>
+
+      {/* PHASE 10A — the owned-trailer list arrives as a spreadsheet, so it
+          imports as one. Matching is by trailer number, so re-importing an
+          updated list corrects records instead of duplicating them. */}
+      {importOpen && (
+        <div className="exc-form">
+          <div className="am-muted">Columns: <b>trailer #, type, status, location, notes</b>. A header row is optional.</div>
+          <textarea className="am-input" rows={5} value={csv} placeholder={'53044,53\' Dry Van,Available,San Antonio,\n53045,53\' Reefer,In Shop,Dallas,brakes'}
+            onChange={(e) => setCsv(e.target.value)} />
+          <div className="exc-actions">
+            <button className="am-save" disabled={!csv.trim()} onClick={() => {
+              const r = importTrailersCsv(csv);
+              setTrailers(loadTrailers()); setCsv('');
+              setImportMsg(`✓ ${r.added} added, ${r.updated} updated${r.skipped ? `, ${r.skipped} skipped (no trailer #)` : ''}.`);
+            }}>Import</button>
+            <button className="am-clear" onClick={() => fileRef.current?.click()}>Choose a CSV file…</button>
+            <input ref={fileRef} type="file" accept=".csv,text/csv" style={{ display: 'none' }}
+              onChange={(e) => { const f = e.target.files?.[0]; if (f) void f.text().then(setCsv); e.target.value = ''; }} />
+            <button className="am-clear" onClick={() => { setImportOpen(false); setCsv(''); }}>Close</button>
+            {importMsg && <span className="am-muted">{importMsg}</span>}
+          </div>
+        </div>
+      )}
 
       <div className="am-scroll">
         <table className="am-grid am-fleet">

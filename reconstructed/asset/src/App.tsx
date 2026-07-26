@@ -16,6 +16,7 @@ import RolesView from './views/RolesView';
 import SettingsView from './views/SettingsView';
 import FinancialsView, { type FinPage } from './views/FinancialsView';
 import BillingView from './views/BillingView';
+import AdminView from './views/AdminView';
 import { loadDrivers } from './data/driversStore';
 import { loadFleet } from './data/fleetStore';
 import { ROUTES } from './data/fleet';
@@ -30,11 +31,13 @@ import { startOdometerSync } from './data/fleetioSync';
    kept minimal, and driver / team / route look-ups are separate filters below
    the header (not one catch-all search box). */
 
-const APP_VERSION = '0.42.0';
+const APP_VERSION = '0.43.0';
 
 type Tab = 'matrix' | 'optimizer' | 'otp' | 'covered' | 'repo' | 'fleet' | 'fleet-map'
   | 'trucks' | 'trailers' | 'loads' | 'drivers' | 'roles'
-  | 'fin-cpm' | 'fin-customer' | 'fin-truck' | 'fin-miles' | 'fin-billing' | 'integrations';
+  | 'fin-cpm' | 'fin-customer' | 'fin-truck' | 'fin-miles' | 'fin-billing' | 'integrations'
+  /* PHASE 10B.2 — hidden, owner-only, no nav link. Reached with #admin. */
+  | 'admin';
 
 interface NavItem { key: Tab; label: string; managerOnly?: boolean; sub?: string }
 const NAV_GROUPS: { title: string; items: NavItem[]; restricted?: boolean }[] = [
@@ -49,8 +52,8 @@ const NAV_GROUPS: { title: string; items: NavItem[]; restricted?: boolean }[] = 
     { key: 'drivers', label: '👤 Driver Availability' },
   ] },
   { title: 'Fleet', items: [
-    { key: 'fleet', label: '🚛 Team Status' },
-    { key: 'trucks', label: '🚚 Trucks' },
+
+    { key: 'trucks', label: '🚚 Fleet' },
     { key: 'trailers', label: '🚟 Trailers' },
     { key: 'loads', label: '📦 Loads' },
     { key: 'fleet-map', label: '🗺 Fleet Map' },
@@ -118,6 +121,16 @@ function LookupField({ icon, label, placeholder, hits, onPick }: {
 
 export default function App() {
   const [tab, setTab] = useState<Tab>('matrix');
+
+  /* PHASE 10B.2 — the hidden owner-only page. There is no nav link on purpose;
+     #admin in the address bar is the whole door, and the page itself refuses
+     anyone who isn't the owner. */
+  useEffect(() => {
+    const read = () => { if (window.location.hash.replace('#', '') === 'admin') setTab('admin'); };
+    read();
+    window.addEventListener('hashchange', read);
+    return () => window.removeEventListener('hashchange', read);
+  }, []);
   const { theme, toggle } = useTheme();
   const [sidebarOpen, setSidebarOpen] = useState<boolean>(() => (typeof window !== 'undefined' ? window.innerWidth > 820 : true));
   const [seedDrivers, setSeedDrivers] = useState<{ q: string; nonce: number }>({ q: '', nonce: 0 });
@@ -229,7 +242,9 @@ export default function App() {
               const items = g.items.filter((it) => !it.managerOnly || showRoles);
               if (!items.length) return null;
               const open = navOpen[g.title] ?? true;
-              const activeHere = items.some((it) => it.key === tab);
+              /* the merged Fleet page has two tab values behind one nav item */
+              const sameNav = (k: Tab) => k === tab || (k === 'trucks' && tab === 'fleet');
+              const activeHere = items.some((it) => sameNav(it.key));
               return (
                 <div key={g.title} className={`nav-group ${open ? 'open' : 'closed'}`}>
                   <button className={`nav-group-title ${activeHere ? 'has-active' : ''}`} onClick={() => setNavOpen((p) => ({ ...p, [g.title]: !open }))}>
@@ -238,7 +253,7 @@ export default function App() {
                   {open && items.map((it) => (
                     <div key={it.key}>
                       {it.sub && <div className="nav-subhead">{it.sub}</div>}
-                      <button className={`nav-item ${tab === it.key ? 'on' : ''}`} onClick={() => go(it.key)}>{it.label}</button>
+                      <button className={`nav-item ${sameNav(it.key) ? 'on' : ''}`} onClick={() => go(it.key)}>{it.label}</button>
                     </div>
                   ))}
                 </div>
@@ -254,8 +269,20 @@ export default function App() {
           {tab === 'otp' && <OTPView />}
           {tab === 'covered' && <CoveredView />}
           {tab === 'repo' && <LoadRepositoryView />}
-          {tab === 'fleet' && <FleetStatusView seed={seedFleet} />}
-          {tab === 'trucks' && <TrucksView />}
+          {/* PHASE 10B.7 — Team Status and Trucks were the same 98 rows with
+              overlapping columns and two nav items. One Fleet page, one toggle:
+              Trucks is the equipment view, Team is the crew view. The 'fleet'
+              tab still exists so the driver/team lookup can deep-link into the
+              crew view. */}
+          {(tab === 'trucks' || tab === 'fleet') && (
+            <div className="fleet-merge">
+              <div className="fleet-seg">
+                <button className={`am-tchip ${tab === 'trucks' ? 'on' : ''}`} onClick={() => go('trucks')}>🚚 Trucks</button>
+                <button className={`am-tchip ${tab === 'fleet' ? 'on' : ''}`} onClick={() => go('fleet')}>🚛 Team</button>
+              </div>
+              {tab === 'trucks' ? <TrucksView /> : <FleetStatusView seed={seedFleet} />}
+            </div>
+          )}
           {tab === 'trailers' && <TrailersView />}
           {tab === 'loads' && <LoadsView />}
           {tab === 'fleet-map' && <FleetMapView />}
@@ -264,6 +291,7 @@ export default function App() {
           {tab === 'integrations' && <SettingsView />}
           {finPageOf(tab) && <FinancialsView page={finPageOf(tab)!} />}
           {tab === 'fin-billing' && <BillingView />}
+          {tab === 'admin' && <AdminView />}
         </main>
       </div>
     </div>

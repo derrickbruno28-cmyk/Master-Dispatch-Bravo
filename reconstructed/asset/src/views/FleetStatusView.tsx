@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import {
-  loadFleet, saveTruck, removeTruck, blankTruck, TERMINAL_LABELS, teamStatusMeta, isShutdown,
+  loadFleet, saveTruck, removeTruck, TERMINAL_LABELS, teamStatusMeta, isShutdown,
   type FleetTruck,
 } from '../data/fleetStore';
 import { driverNames, driverByName, driverHomeCity, cityKey } from '../data/driversStore';
@@ -81,7 +81,9 @@ export default function FleetStatusView({ seed }: { seed?: { q: string; nonce: n
         <span className="am-muted">{rows.length} of {fleet.length} teams</span>
         <span className="am-muted fleet-status-hint">Status reads live from the route on the calendar — update it on the Asset Matrix. Completed routes drop off (team shows its next route or NTB). Availability (NTB / Deadhead / Shutdown) shows when a truck has no active load.</span>
         <button className={`am-clear${showCompleted ? ' on' : ''}`} onClick={() => setShowCompleted((s) => !s)}>✅ {showCompleted ? 'Hide' : 'Show'} completed loads</button>
-        <button className="am-save fleet-add" onClick={() => { setEditing(blankTruck()); setIsNew(true); }}>＋ Add Team</button>
+        {/* PHASE 10B.6 — the Asset Matrix header owns "Add Team"; three entry
+            points for one action was two too many. The empty-state link below
+            still creates one, because that is where a new user needs it. */}
       </div>
 
       {showCompleted && (

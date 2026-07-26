@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { loadAll, fmtMoney, fmtMiles, type Load } from '../data/loadsStore';
 import { onChange } from '../data/bus';
 import { LOAD_STATUS_LABEL, LOAD_STATUS_COLOR } from '../data/schedule';
+import LoadDetailModal from './LoadDetailModal';
 
 /* Loads — a READ-ONLY ledger of every load we've built, with a date-range filter
    to pull up what went out over a stretch. Status is view-only here: a load is
@@ -14,6 +15,7 @@ const STATUS_ORDER = ['unassigned', 'open', 'covered', 'dispatched', 'at yard', 
 
 export default function LoadsView() {
   const [loads, setLoads] = useState<Load[]>(() => loadAll());
+  const [open, setOpen] = useState<Load | null>(null);
   const [from, setFrom] = useState<string>(() => daysAgo(30));
   const [to, setTo] = useState<string>(() => isoToday());
   const [q, setQ] = useState('');
@@ -66,7 +68,8 @@ export default function LoadsView() {
             {rows.map((l) => {
               const done = l.status === 'completed';
               return (
-                <tr key={l.id} className={done ? 'loads-done' : ''}>
+                <tr key={l.id} className={`${done ? 'loads-done' : ''} bill-row`}
+                  title="Open this load" onClick={() => setOpen(l)}>
                   <td className="am-muted">{l.date || '—'}</td>
                   <td>{l.routeName || <span className="am-muted">(no route)</span>}{l.uspsContract && <span className="am-usps" style={{ marginLeft: 6 }}>USPS</span>}</td>
                   <td>{l.customerName || <span className="am-muted">—</span>}</td>
@@ -81,6 +84,16 @@ export default function LoadsView() {
           </tbody>
         </table>
       </div>
+
+      {/* PHASE 10B.8 — the ledger stays read-only in framing, but a row you
+          cannot open is a row you cannot act on. */}
+      {open && (
+        <LoadDetailModal
+          tractor={open.assignedTruck} date={open.date} canDel={false} seedLoad={open}
+          onSave={() => setOpen(null)} onClear={() => setOpen(null)}
+          onCreated={() => setOpen(null)} onClose={() => setOpen(null)}
+        />
+      )}
     </div>
   );
 }
