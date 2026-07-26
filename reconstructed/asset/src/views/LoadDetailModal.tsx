@@ -15,6 +15,7 @@ import { routingProvider } from '../integrations/routing';
 import { rateConParser, applyRateCon } from '../integrations/ratecon';
 import { LOAD_STATUS_LABEL, type Assignment } from '../data/schedule';
 import AssignmentsSection from './AssignmentsSection';
+import MilestonesTab from './MilestonesTab';
 import { legsFor, missingForLegs, legTrucks, syncLegCells, seatName, driverNamesOf } from '../data/tms/assignmentsStore';
 import type { LoadAssignment } from '../data/tms/types';
 
@@ -26,7 +27,7 @@ import type { LoadAssignment } from '../data/tms/types';
 
 const STATUSES = ['unassigned', 'open', 'covered', 'dispatched', 'at yard', 'at shipper', 'en route', 'at receiver', 'delivered', 'completed', 'off'];
 
-type Tab = 'info' | 'stops' | 'docs' | 'dispatch';
+type Tab = 'info' | 'stops' | 'milestones' | 'docs' | 'dispatch';
 
 export default function LoadDetailModal({ tractor, date, assignment, canDel, initialTab, warning, newLoad, seedLoad, onSave, onClear, onCreated, onClose }: {
   tractor: string; date: string; assignment?: Assignment; canDel: boolean; initialTab?: Tab; warning?: string;
@@ -140,7 +141,7 @@ export default function LoadDetailModal({ tractor, date, assignment, canDel, ini
 
         {/* tabs */}
         <div className="load-tabs">
-          {([['info', 'Load Info'], ['stops', l.segments.length ? `Stops · ✂${l.segments.length}` : 'Stops'], ['docs', 'Documents'], ['dispatch', 'Dispatch']] as [Tab, string][]).map(([k, lab]) => (
+          {([['info', 'Load Info'], ['stops', l.segments.length ? `Stops · ✂${l.segments.length}` : 'Stops'], ['milestones', 'Milestones'], ['docs', 'Documents'], ['dispatch', 'Dispatch']] as [Tab, string][]).map(([k, lab]) => (
             <button key={k} className={`load-tab ${tab === k ? 'on' : ''}`} onClick={() => setTab(k)}>{lab}</button>
           ))}
         </div>
@@ -164,6 +165,7 @@ export default function LoadDetailModal({ tractor, date, assignment, canDel, ini
 
         {tab === 'info' && <InfoTab l={l} f={f} onLegs={onLegs} canDel={canDel} assignable={!!(newLoad || seedLoad)} autoFilled={autoFilled} onRateCon={onRateCon} onNotice={setNotice} onClear={() => { clearLoadCell(tractor, date); onClear(); }} />}
         {tab === 'stops' && <StopsTab l={l} setL={setL} persist={persist} />}
+        {tab === 'milestones' && <MilestonesTab load={l} onStatus={() => setL((p) => ({ ...p }))} />}
         {tab === 'docs' && <DocsTab loadId={l.id} />}
         {tab === 'dispatch' && (
           <DispatchTab l={l} legs={legs} missing={missing} flash={setNotice}

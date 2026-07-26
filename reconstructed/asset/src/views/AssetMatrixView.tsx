@@ -8,6 +8,7 @@ import {
   isoDate, mondayOf, addDays, driverConflicts, type Assignment,
 } from '../data/schedule';
 import { canDelete, canApproveSoloOverride } from '../data/permStore';
+import FastLog from './FastLog';
 import LoadDetailModal from './LoadDetailModal';
 import { loadAll, moveLoadCell, clearLoadCell, type Load } from '../data/loadsStore';
 import { documentStore } from '../integrations/documents';
@@ -384,6 +385,8 @@ function TerminalRows({ term, trucks, dates, assign, setEditing, openDispatch, l
   hosByTruck: Record<string, number>; sugCell: string | null; setSugCell: (k: string | null) => void;
   advanceWeek: () => void; driverPos: Map<string, string>;
 }) {
+  /* which cell has the ⚡ quick-log popover open (cell key, or null) */
+  const [fastLog, setFastLog] = useState<string | null>(null);
   const teams = trucks.filter((t) => (t.driver2 || '').trim());
   const solos = trucks.filter((t) => !(t.driver2 || '').trim());
   const [confirmRemove, setConfirmRemove] = useState<string | null>(null);
@@ -516,6 +519,18 @@ function TerminalRows({ term, trucks, dates, assign, setEditing, openDispatch, l
                       const ld = loads.get(k); const dc = ld ? (docCounts[ld.id] ?? 0) : 0;
                       return (
                         <div className="am-chipbadges">
+                          {/* PHASE 2 fast-log: one tap moves the truck along without
+                              opening the modal. Stops propagation so the cell's own
+                              click (open the load) still works everywhere else. */}
+                          {ld && (
+                            <span className="am-fastwrap">
+                              <button className="am-fastbtn" title="Quick-log the next required milestone"
+                                onClick={(e) => { e.stopPropagation(); setFastLog(fastLog === k ? null : k); }}>⚡</button>
+                              {fastLog === k && (
+                                <FastLog load={ld} onClose={() => setFastLog(null)} onLogged={() => setFastLog(null)} />
+                              )}
+                            </span>
+                          )}
                           {dc > 0 && <span className="am-docbadge" title={`${dc} document${dc > 1 ? 's' : ''}`}>📎{dc}</span>}
                           {ld?.dispatchedAt && <span className="am-sentbadge" title="Dispatched — flyer sent">⚡sent</span>}
                           <button className="am-zap" title="Dispatch driver — load sheet" onClick={(e) => { e.stopPropagation(); openDispatch(k); }}>⚡</button>

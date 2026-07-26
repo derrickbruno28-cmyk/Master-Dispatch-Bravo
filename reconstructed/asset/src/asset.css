@@ -883,3 +883,64 @@
   background: rgba(224,160,61,0.10); border: 1px solid rgba(224,160,61,0.32);
   border-radius: 7px; padding: 5px 9px; }
 .leg-actions { display: flex; align-items: center; gap: 9px; margin-top: 2px; }
+
+/* PHASE 2 — milestone engine.
+   The ladder table, the source tags, and the board's one-tap quick-log. */
+.ms-wrap { display: flex; flex-direction: column; gap: 12px; }
+.ms-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.ms-head .am-muted { font-size: 12.5px; max-width: 720px; }
+
+.ms-logs { border: 1px solid var(--border); border-radius: 10px; padding: 8px 11px;
+  background: var(--panel-2); max-height: 220px; overflow-y: auto; }
+.ms-log-row { display: grid; grid-template-columns: 108px 190px 1fr; gap: 8px; font-size: 11.5px;
+  padding: 3px 0; border-bottom: 1px solid color-mix(in srgb, var(--border) 55%, transparent); }
+.ms-log-row:last-child { border-bottom: none; }
+
+.ms-stop { border: 1px solid var(--border); border-radius: 12px; padding: 9px 11px; }
+.ms-stop-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 7px; }
+.ms-stop-title { font-weight: 800; font-size: 13px; }
+.ms-det { font-size: 11px; font-weight: 700; color: var(--muted); }
+.ms-det.on { color: var(--amber); }
+.ms-det em { font-style: normal; opacity: .75; }
+.ms-next { margin-left: auto; font-size: 10.5px; font-weight: 800; padding: 1px 7px; border-radius: 5px;
+  background: color-mix(in srgb, var(--accent) 15%, transparent); color: var(--accent); }
+
+.ms-scroll { overflow-x: auto; }
+.ms-table { font-size: 11.5px; min-width: 900px; }
+.ms-table th { font-size: 10px; text-transform: uppercase; letter-spacing: .03em; }
+.ms-table td { vertical-align: top; padding: 3px 6px; }
+.ms-row-empty td { opacity: .55; }
+.ms-actions { display: flex; gap: 3px; }
+.ms-log-btn { padding: 1px 5px; font-size: 11px; line-height: 1.4; }
+.ms-cmt { max-width: 160px; }
+.ms-cre { font-size: 10px; line-height: 1.35; }
+.ms-late { font-size: 10.5px; font-weight: 700; color: var(--amber); margin-top: 2px; }
+.ms-variance { font-size: 10.5px; font-weight: 800; color: var(--red); margin-top: 2px; }
+
+.ms-src { font-size: 9.5px; font-weight: 800; padding: 1px 5px; border-radius: 4px; letter-spacing: .02em; }
+.ms-src-dispatch { background: rgba(0,184,212,0.16); color: #00b8d4; }
+.ms-src-driver   { background: rgba(46,160,67,0.16); color: var(--green); }
+.ms-src-samsara  { background: rgba(167,139,250,0.18); color: #a78bfa; }
+
+.ms-complete { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 8px;
+  padding-top: 8px; border-top: 1px dashed var(--border); font-size: 11.5px; }
+.ms-reason { max-width: 260px; }
+.ms-detail { max-width: 220px; }
+
+/* board cell quick-log */
+.am-fastwrap { position: relative; display: inline-flex; }
+.am-fastbtn { border: 1px solid var(--border); background: var(--panel); color: var(--accent);
+  border-radius: 4px; padding: 0 4px; font-size: 10px; line-height: 1.5; cursor: pointer; }
+.am-fastbtn:hover { border-color: var(--accent); }
+.fastlog { position: absolute; z-index: 40; top: 120%; right: 0; width: 268px; text-align: left;
+  background: var(--panel); border: 1px solid var(--accent); border-radius: 10px; padding: 9px 11px;
+  box-shadow: 0 10px 30px rgba(0,0,0,.35); cursor: default; white-space: normal; }
+.fastlog-head { display: flex; align-items: center; justify-content: space-between; font-size: 12px; margin-bottom: 6px; }
+.fastlog-x { padding: 0 5px; }
+.fastlog-next { margin-bottom: 7px; }
+.fastlog-ev { font-weight: 800; font-size: 13px; }
+.fastlog-late { font-size: 11px; font-weight: 700; color: var(--amber);
+  background: rgba(224,160,61,0.10); border: 1px solid rgba(224,160,61,0.32);
+  border-radius: 7px; padding: 6px 8px; margin-bottom: 7px; display: flex; flex-direction: column; gap: 5px; }
+.fastlog-go { width: 100%; }
+.fastlog-foot { font-size: 10px; margin-top: 5px; }
