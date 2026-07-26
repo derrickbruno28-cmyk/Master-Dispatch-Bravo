@@ -10,6 +10,6 @@
       { "source": "/firebase-config.js", "headers": [{ "key": "Cache-Control", "value": "no-cache, no-store, must-revalidate" }] }
     ]
   },
-  "firestore": { "rules": "firestore.rules" },
+  "firestore": { "rules": "firestore.rules", "indexes": "firestore.indexes.json" },
   "functions": { "source": "functions", "runtime": "nodejs20" }
 }

@@ -10,6 +10,7 @@ import { refreshDriversFromShared } from '../data/driversStore';
 import { refreshFleetFromShared, resetFleetToBare } from '../data/fleetStore';
 import { clearAllAssignments } from '../data/schedule';
 import { isOwner } from '../data/permStore';
+import MigrationCard from './MigrationCard';
 
 /* Integrations — the connection panel for external telematics. Samsara is the
    big one: paste an API key here (kept in this browser only, never in code), and
@@ -82,6 +83,9 @@ export default function SettingsView() {
         Connect the trucks' telematics here. Keys live only in your browser and are never stored in the app's code.
         The connection UI is ready now; features run on realistic placeholder data until the backend link is finished.
       </p>
+
+      {/* owner-only: Phase 0 TMS schema migration (plans first, writes only after review) */}
+      <MigrationCard />
 
       {/* owner-only: one-time reset of the shared LIVE board (Firestore data) */}
       {isOwner() && (

@@ -1,0 +1,163 @@
+{
+  "//": [
+    "Composite indexes for the Asset TMS (Phase 0).",
+    "Firestore auto-indexes every single field, so only MULTI-field queries and",
+    "collection-group queries need an entry here. Each index below names the",
+    "screen that needs it, so an unused one can be retired with confidence.",
+    "Add the index in the SAME commit as the query that needs it — a missing",
+    "composite index fails at runtime, not at build time."
+  ],
+  "indexes": [
+    {
+      "//": "Loads list / board: the open board by terminal, newest first.",
+      "collectionGroup": "loads",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "bookingTerminal", "order": "ASCENDING" },
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "//": "Loads list filtered by a single board status, newest first.",
+      "collectionGroup": "loads",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "//": "Phase 4 billing chips: Ready For Accounting / On Hold / Cancelled queues.",
+      "collectionGroup": "loads",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "billingStatus", "order": "ASCENDING" },
+        { "fieldPath": "updatedAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "//": "Phase 4 chips: Missing BOL / Missing POD within a billing state.",
+      "collectionGroup": "loads",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "billingStatus", "order": "ASCENDING" },
+        { "fieldPath": "missingBol", "order": "ASCENDING" },
+        { "fieldPath": "missingPod", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "//": "Reports > By Customer.",
+      "collectionGroup": "loads",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "customer", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "//": "USPS contract freight by terminal (Routes Covered / OTP reporting).",
+      "collectionGroup": "loads",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "isUspsContract", "order": "ASCENDING" },
+        { "fieldPath": "bookingTerminal", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "//": "Phase 5: child loads spawned from an exception on a parent load.",
+      "collectionGroup": "loads",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "parentLoadId", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "//": "Phase 2 Milestones tab: grouped by stop, in ladder order.",
+      "collectionGroup": "milestones",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "stopSeq", "order": "ASCENDING" },
+        { "fieldPath": "ladderIndex", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "//": "Phase 2 fast-log: the newest event on a leg, to find the next required rung.",
+      "collectionGroup": "milestones",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "assignmentId", "order": "ASCENDING" },
+        { "fieldPath": "actualAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "//": "Phase 2 variance badge: manual vs Samsara events for the same rung.",
+      "collectionGroup": "milestones",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "stopId", "order": "ASCENDING" },
+        { "fieldPath": "eventType", "order": "ASCENDING" },
+        { "fieldPath": "source", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "//": "Phase 1: a truck's legs across loads (board render + double-book guard).",
+      "collectionGroup": "assignments",
+      "queryScope": "COLLECTION_GROUP",
+      "fields": [
+        { "fieldPath": "truckNumber", "order": "ASCENDING" },
+        { "fieldPath": "dispatchedAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "//": "Phase 1: OTP/OTD reporting across every leg.",
+      "collectionGroup": "assignments",
+      "queryScope": "COLLECTION_GROUP",
+      "fields": [
+        { "fieldPath": "legStatus", "order": "ASCENDING" },
+        { "fieldPath": "otpResult", "order": "ASCENDING" },
+        { "fieldPath": "otdResult", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "//": "Phase 3: stops in sequence, and appointment-window lookups by date.",
+      "collectionGroup": "stops",
+      "queryScope": "COLLECTION_GROUP",
+      "fields": [
+        { "fieldPath": "apptDate", "order": "ASCENDING" },
+        { "fieldPath": "seq", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "//": "Phase 4: the document queue by type across all loads.",
+      "collectionGroup": "documents",
+      "queryScope": "COLLECTION_GROUP",
+      "fields": [
+        { "fieldPath": "docType", "order": "ASCENDING" },
+        { "fieldPath": "uploadedAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "//": "Phase 5: the open-exception queue.",
+      "collectionGroup": "exceptions",
+      "queryScope": "COLLECTION_GROUP",
+      "fields": [
+        { "fieldPath": "resolved", "order": "ASCENDING" },
+        { "fieldPath": "exceptionType", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "//": "Audit drawer: one load's history, newest first.",
+      "collectionGroup": "audit",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "at", "order": "DESCENDING" },
+        { "fieldPath": "action", "order": "ASCENDING" }
+      ]
+    }
+  ],
+  "fieldOverrides": []
+}

@@ -1,18 +1,183 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    // Only signed-in GH Logistics / AJG Transport work accounts can read or write.
+
+    /* ------------------------------------------------------------------ identity
+       Only signed-in GH Logistics / AJG Transport work accounts can touch anything.
+       This gate is unchanged from the original rules and must stay that way —
+       removing ajgtransport access requires express written consent. */
     function isCompany() {
       return request.auth != null
         && request.auth.token.email_verified == true
         && (request.auth.token.email.matches('.*@ghlogisticsllc[.]com$')
             || request.auth.token.email.matches('.*@ajgtransport[.]com$'));
     }
-    // Covers every collection the app uses: assetSchedule (board cells),
-    // loads (rich load records + segments), customers, loadDocuments (doc
-    // metadata when the Firebase DocumentStore is enabled). All company-only.
-    match /{document=**} {
-      allow read, write: if isCompany();
+
+    function email() { return request.auth.token.email.lower(); }
+
+    /* Mirrors permStore.OWNER_EMAILS. The owner is never denied by a role lookup —
+       if the roster doc is missing or wrong, the owner still gets in. */
+    function isOwner() {
+      return email() == 'derrick.bruno28@gmail.com'
+          || email() == 'derrick@ghlogisticsllc.com';
     }
+
+    /* The assigned role, straight off assetUsers/{email} — the same doc the Roles
+       tab writes. A brand-new sign-in may not have its roster doc yet, so a
+       missing doc resolves to the safe edit-only default instead of erroring;
+       that keeps a first-day user working rather than hard-denying them.
+
+       KEEP THIS FLAT and call it ONCE per allow statement. Rules evaluate a
+       bounded number of expressions per request, and nesting role lookups inside
+       other helpers is exactly what blows that budget — it surfaces as bogus
+       "missing or insufficient permissions" errors on perfectly legal writes. */
+    function role() {
+      return exists(/databases/$(database)/documents/assetUsers/$(email()))
+        ? get(/databases/$(database)/documents/assetUsers/$(email())).data.get('role', 'fmt')
+        : 'fmt';
+    }
+
+    /* Delete a whole record (load, driver, team, cell). Everyone EXCEPT plain FMT,
+       matching permStore.canDelete. FMT can never delete anything, anywhere. */
+    function mayDelete() {
+      return isOwner() || role() in ['owner', 'fmt_lead', 'us_ops'];
+    }
+
+    /* ---------------------------------------------------------------- stamping
+       Every TMS write carries who and when. `updatedBy` must be the caller — a
+       client cannot attribute a change to somebody else — and createdBy/createdAt
+       are immutable once set, so authorship can't be rewritten after the fact.
+       Timestamps are ISO-8601 strings (see data/tms/types). */
+    function stampedCreate() {
+      return request.resource.data.createdBy == email()
+          && request.resource.data.updatedBy == email()
+          && request.resource.data.createdAt is string
+          && request.resource.data.updatedAt is string;
+    }
+    function stampedUpdate() {
+      return request.resource.data.updatedBy == email()
+          && request.resource.data.updatedAt is string
+          && request.resource.data.createdBy == resource.data.createdBy
+          && request.resource.data.createdAt == resource.data.createdAt;
+    }
+
+    /* ------------------------------------------------------------------- loads
+       Stamping is enforced only on docs that actually carry stamps, so legacy
+       records still in the old shape keep saving while the phases roll out. Once
+       every writer goes through data/tms/stamp, drop the escape hatch and require
+       stamps unconditionally. */
+    match /loads/{loadId} {
+      allow read:   if isCompany();
+      allow create: if isCompany() && (!('createdBy' in request.resource.data) || stampedCreate());
+      allow update: if isCompany() && (!('updatedBy' in request.resource.data) || stampedUpdate());
+      allow delete: if isCompany() && mayDelete();
+
+      /* Subcollections — any role may add and edit, only non-FMT may delete. */
+      match /assignments/{assignmentId} {
+        allow read:   if isCompany();
+        allow create: if isCompany() && stampedCreate();
+        allow update: if isCompany() && stampedUpdate();
+        allow delete: if isCompany() && mayDelete();
+      }
+      match /stops/{stopId} {
+        allow read:   if isCompany();
+        allow create: if isCompany() && stampedCreate();
+        allow update: if isCompany() && stampedUpdate();
+        allow delete: if isCompany() && mayDelete();
+      }
+      match /milestones/{milestoneId} {
+        allow read:   if isCompany();
+        allow create: if isCompany() && stampedCreate();
+        allow update: if isCompany() && stampedUpdate();
+        allow delete: if isCompany() && mayDelete();
+      }
+      match /documents/{docId} {
+        allow read:   if isCompany();
+        allow create: if isCompany() && stampedCreate();
+        allow update: if isCompany() && stampedUpdate();
+        allow delete: if isCompany() && mayDelete();
+      }
+      match /exceptions/{exceptionId} {
+        allow read:   if isCompany();
+        allow create: if isCompany() && stampedCreate();
+        allow update: if isCompany() && stampedUpdate();
+        allow delete: if isCompany() && mayDelete();
+      }
+      match /notes/{noteId} {
+        allow read:   if isCompany();
+        allow create: if isCompany() && stampedCreate();
+        allow update: if isCompany() && stampedUpdate();
+        allow delete: if isCompany() && mayDelete();
+      }
+
+      /* APPEND-ONLY. An audit event is written once and then never edited or
+         removed — not by FMT, not by US Ops, not by the owner. A change log you
+         can rewrite is not a change log. This is also why there is NO recursive
+         `/{document=**}` rule in this file: allow statements OR together, so a
+         permissive catch-all would silently re-grant update and delete here and
+         quietly undo both this and the FMT delete ban. Add new collections
+         explicitly below instead. */
+      match /audit/{eventId} {
+        allow read:   if isCompany();
+        allow create: if isCompany()
+                      && request.resource.data.by == email()
+                      && request.resource.data.at is string;
+        allow update, delete: if false;
+      }
+    }
+
+    /* ------------------------------------------------- board & fleet records
+       Any recognized role reads, adds, and edits; only non-FMT deletes. */
+    match /assetSchedule/{docId} {
+      allow read, create, update: if isCompany();
+      allow delete: if isCompany() && mayDelete();
+    }
+    match /assetFleet/{docId} {
+      allow read, create, update: if isCompany();
+      allow delete: if isCompany() && mayDelete();
+    }
+    match /assetDrivers/{docId} {
+      allow read, create, update: if isCompany();
+      allow delete: if isCompany() && mayDelete();
+    }
+    match /assetTrailers/{docId} {
+      allow read, create, update: if isCompany();
+      allow delete: if isCompany() && mayDelete();
+    }
+    match /assetAddresses/{docId} {
+      allow read, create, update: if isCompany();
+      allow delete: if isCompany() && mayDelete();
+    }
+    match /loadDocuments/{docId} {
+      allow read, create, update: if isCompany();
+      allow delete: if isCompany() && mayDelete();
+    }
+    /* Load-number counter (Phase 0). Any role may take the next number; nobody
+       may delete the counter and reset the sequence. */
+    match /tmsCounters/{counterId} {
+      allow read, create, update: if isCompany();
+      allow delete: if false;
+    }
+
+    /* Bravo's lane mirror — this app only ever READS it. Writes belong to the
+       Bravo Matrix project and must never originate here. */
+    match /lanes/{laneId} {
+      allow read: if isCompany();
+      allow write: if false;
+    }
+
+    /* Role assignment is the one thing FMT Lead and US Ops do NOT get. A user's
+       own roster doc is self-upserted on sign-in (presence, display name, last
+       seen), but the `role` field itself may only be set or changed by the owner. */
+    match /assetUsers/{userEmail} {
+      allow read:   if isCompany();
+      allow create: if isCompany() && (isOwner() || !('role' in request.resource.data));
+      allow update: if isCompany() && (isOwner() || request.resource.data.get('role', '') == resource.data.get('role', ''));
+      allow delete: if isCompany() && isOwner();
+    }
+
+    /* NO recursive catch-all here on purpose — see the audit note above. A new
+       collection needs its own match block; until it gets one it is denied, which
+       fails loudly in the console rather than silently opening a hole. */
   }
 }
