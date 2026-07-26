@@ -54,11 +54,17 @@ service cloud.firestore {
           && request.resource.data.createdAt is string
           && request.resource.data.updatedAt is string;
     }
+    /* createdBy/createdAt are IMMUTABLE ONCE SET. The .get() default is what makes
+       that "once set": a doc that has no prior stamp (every legacy load, before
+       the Phase 0 migration writes one) defaults to the incoming value and passes,
+       while a doc that already has one must match it exactly. Comparing against
+       resource.data.createdBy directly would reject the migration itself, since
+       the legacy documents have no such field to compare to. */
     function stampedUpdate() {
       return request.resource.data.updatedBy == email()
           && request.resource.data.updatedAt is string
-          && request.resource.data.createdBy == resource.data.createdBy
-          && request.resource.data.createdAt == resource.data.createdAt;
+          && request.resource.data.createdBy == resource.data.get('createdBy', request.resource.data.createdBy)
+          && request.resource.data.createdAt == resource.data.get('createdAt', request.resource.data.createdAt);
     }
 
     /* ------------------------------------------------------------------- loads

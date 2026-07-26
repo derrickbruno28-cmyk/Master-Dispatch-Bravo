@@ -15,6 +15,8 @@ import { emitChange } from './bus';
 import { cellKey, setAssignment } from './schedule';
 import { routingProvider, type RoutePoint } from '../integrations/routing';
 import { rememberStops } from './addressStore';
+import { stampUpdate } from './tms/stamp';
+import type { Stamps } from './tms/types';
 
 export interface LoadStop {
   type: 'pickup' | 'delivery';
@@ -146,11 +148,21 @@ export function loadForCell(tractor: string, date: string): Load | undefined {
 
 export async function saveLoad(l: Load): Promise<Load> {
   const withMiles = await recalcMiles(l);
-  cache = { ...cache, [withMiles.id]: withMiles };
-  if (firebaseEnabled && db) persistDoc(withMiles); else writeLocal();
-  rememberStops(withMiles.stops);   // address book: remember stops for auto-fill next time
+  /* Stamp every save with the signed-in user. This is required once a load has
+     been through the Phase 0 migration: the doc then carries updatedBy, and the
+     security rules reject any write whose updatedBy isn't the caller — writing
+     the record back verbatim would send the PREVIOUS editor's email and be
+     denied. Stamping here keeps the legacy editor working post-migration and
+     satisfies the "every write is attributed" rule for this path too.
+     createdBy/createdAt are carried through untouched (rules make them
+     immutable once set). */
+  const stamps = stampUpdate(withMiles as Partial<Stamps>);
+  const next: Load = { ...withMiles, ...stamps };
+  cache = { ...cache, [next.id]: next };
+  if (firebaseEnabled && db) persistDoc(next); else writeLocal();
+  rememberStops(next.stops);   // address book: remember stops for auto-fill next time
   emitChange();
-  return withMiles;
+  return next;
 }
 
 export function removeLoad(id: string) {

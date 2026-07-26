@@ -1,0 +1,67 @@
+name: Deploy Asset Firestore Rules
+
+# Deploys firestore.rules + firestore.indexes.json for the Asset Matrix
+# (project asset-matrix-gh).
+#
+# MANUAL ON PURPOSE — this is workflow_dispatch only, never a push trigger.
+# Security rules are enforced server-side for every user at once: a bad rule
+# doesn't fail a build, it locks the whole team out of live data. So this runs
+# when a human decides to run it, not as a side effect of pushing app code.
+# Hosting keeps its own auto-deploy workflow; the two are deliberately separate.
+#
+# The only secret is FIREBASE_TOKEN, stored in the repo's encrypted Actions
+# secrets (Settings -> Secrets and variables -> Actions).
+
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: 'What to deploy'
+        required: true
+        default: 'rules + indexes'
+        type: choice
+        options:
+          - 'rules + indexes'
+          - 'rules only'
+          - 'indexes only'
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: reconstructed/asset
+    steps:
+      - name: Check out the repo
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      # Prints the compiled ruleset and fails on a syntax error before anything
+      # is published, so a typo can't take the board down.
+      - name: Show what will be deployed
+        run: |
+          echo "--- firestore.rules ---"
+          cat firestore.rules
+          echo "--- firestore.indexes.json ---"
+          cat firestore.indexes.json
+
+      - name: Resolve deploy target
+        id: only
+        run: |
+          case "${{ inputs.target }}" in
+            "rules only")   echo "flag=firestore:rules" >> "$GITHUB_OUTPUT" ;;
+            "indexes only") echo "flag=firestore:indexes" >> "$GITHUB_OUTPUT" ;;
+            *)              echo "flag=firestore:rules,firestore:indexes" >> "$GITHUB_OUTPUT" ;;
+          esac
+
+      - name: Deploy Firestore rules and indexes
+        run: npx --yes firebase-tools@15 deploy --only "${{ steps.only.outputs.flag }}" --project asset-matrix-gh --token "$FIREBASE_TOKEN" --non-interactive
+        env:
+          FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}
