@@ -16,6 +16,8 @@ import { rateConParser, applyRateCon } from '../integrations/ratecon';
 import { LOAD_STATUS_LABEL, type Assignment } from '../data/schedule';
 import AssignmentsSection from './AssignmentsSection';
 import MilestonesTab from './MilestonesTab';
+import TripPicker from './TripPicker';
+import AppointmentsPanel from './AppointmentsPanel';
 import { legsFor, missingForLegs, legTrucks, syncLegCells, seatName, driverNamesOf } from '../data/tms/assignmentsStore';
 import type { LoadAssignment } from '../data/tms/types';
 
@@ -320,6 +322,7 @@ function StopsPanel({ l, highlight }: { l: Load; highlight?: boolean }) {
 
 /* ---------------- Stops ---------------- */
 function StopsTab({ l, setL, persist }: { l: Load; setL: React.Dispatch<React.SetStateAction<Load>>; persist: (n?: Partial<Load>) => Promise<Load> }) {
+  const [tripMsg, setTripMsg] = useState('');
   const upd = (i: number, k: keyof LoadStop, v: string | number) =>
     setL((p) => ({ ...p, stops: p.stops.map((s, j) => (j === i ? { ...s, [k]: v } : s)) }));
   const add = (type: LoadStop['type']) =>
@@ -381,6 +384,11 @@ function StopsTab({ l, setL, persist }: { l: Load; setL: React.Dispatch<React.Se
 
   return (
     <div>
+      {/* PHASE 3: fill the load from a Load Repository trip. Proposes first,
+          writes only what the reviewer ticks. */}
+      <TripPicker load={l} onApplied={(next, summary) => { setL(next); setTripMsg(summary); }} />
+      {tripMsg && <div className="intg-mock-note" style={{ borderColor: 'var(--green)' }}>{tripMsg}</div>}
+
       {l.stops.map((s, i) => (
         <div key={i} className={`load-stopedit ${s.type}`}>
           <div className="load-stopedit-head">
@@ -454,6 +462,10 @@ function StopsTab({ l, setL, persist }: { l: Load; setL: React.Dispatch<React.Se
           <datalist id="load-trucks-split">{fleet.map((t) => <option key={t.tractor} value={t.tractor}>{[t.driver1, t.driver2].filter(Boolean).join(' / ') || t.type}</option>)}</datalist>
         </div>
       )}
+
+      {/* PHASE 3: the appointment WINDOW lives on the stops subcollection — it's
+          what gives At Risk something to measure against. */}
+      <AppointmentsPanel load={l} />
     </div>
   );
 }

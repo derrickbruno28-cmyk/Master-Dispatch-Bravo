@@ -12,10 +12,10 @@
    editing without changing what milestones read. */
 
 import { db, firebaseEnabled } from '../../firebase';
-import { collection, getDocs } from 'firebase/firestore';
+import { collection, doc, getDocs, setDoc, deleteDoc } from 'firebase/firestore';
 import { emitChange } from '../bus';
 import type { Load as LegacyLoad } from '../loadsStore';
-import { stampCreate } from './stamp';
+import { stampCreate, stampUpdate, writeAudit, actorEmail } from './stamp';
 import { blankRefs, type LoadStopDoc, type StopType } from './types';
 
 const SUB = 'stops';
@@ -107,6 +107,70 @@ export function windowCloseOf(s: LoadStopDoc): string {
   const t = s.apptWindowEnd || s.apptWindowStart || '00:00';
   const d = new Date(`${s.apptDate}T${t}`);
   return Number.isNaN(d.getTime()) ? '' : d.toISOString();
+}
+
+/* ------------------------------------------------------------------ writes ---- */
+
+/* Persist the whole stop list in one go. Stops are an ordered set — inserting
+   one renumbers the rest — so writing them together avoids anyone seeing a
+   half-renumbered sequence, and it keeps `seq` (which milestones key off) sane.
+
+   MILESTONES REFERENCE STOPS BY ID, so ids are stable across a save: reordering
+   changes `seq`, never the id. Renaming an id would orphan the ladder. */
+export async function saveStops(loadId: string, stops: LoadStopDoc[]): Promise<LoadStopDoc[]> {
+  const prev = storedStops(loadId);
+  const prevById = new Map(prev.map((s) => [s.id, s]));
+
+  const next = stops
+    .slice()
+    .sort(bySeq)
+    .map((s, i) => ({
+      ...s,
+      seq: i + 1,
+      id: s.id || `stop-${i + 1}`,
+      ...stampUpdate(prevById.get(s.id)),
+    }));
+
+  cache = { ...cache, [loadId]: next };
+
+  if (firebaseEnabled && db) {
+    const database = db;
+    try {
+      await Promise.all(next.map((s) => setDoc(doc(database, 'loads', loadId, SUB, s.id), s as unknown as Record<string, unknown>)));
+      const keep = new Set(next.map((s) => s.id));
+      await Promise.all(prev.filter((s) => !keep.has(s.id)).map((s) => deleteDoc(doc(database, 'loads', loadId, SUB, s.id))));
+      fetched.add(loadId);
+    } catch (e) {
+      console.error('stops write failed', loadId, e);
+      throw e;
+    }
+  }
+
+  writeAudit(loadId, {
+    action: 'stops.save',
+    target: `loads/${loadId}/stops`,
+    summary: `${next.length} stop${next.length === 1 ? '' : 's'} saved by ${actorEmail()} — ${next.map((s) => `${s.seq}:${s.type[0]}${s.location.city || '?'}`).join(', ')}`,
+    before: { stops: prev.length },
+    after: { stops: next.length },
+  });
+
+  emitChange();
+  return next;
+}
+
+export function blankStop(seq: number, type: StopType): LoadStopDoc {
+  return {
+    id: `stop-${seq}`, seq, type, stopAction: '',
+    location: { name: '', address1: '', address2: '', city: '', state: '', zip: '', lat: null, lon: null, timezone: '' },
+    apptDate: '', apptWindowStart: '', apptWindowEnd: '', apptConfirmed: false,
+    qty: null, qtyType: '', weight: null, commodity: '',
+    refs: blankRefs(), seal: '', container: '', chassis: '', customerTrailer: '',
+    reeferFuelLevel: null, instructions: '', locationNotes: '',
+    legMiles: null, excludeMilesFromSettlement: false,
+    actualIn: '', actualOut: '', detentionMinutes: null,
+    splitLoad: { enabled: false, yardLocation: '', isLocalSplit: false, stopAction: '' },
+    ...stampCreate(),
+  };
 }
 
 /** a stop is a YARD / split stop — drives the At Yard board status */

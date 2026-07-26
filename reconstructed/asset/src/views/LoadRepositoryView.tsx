@@ -1,4 +1,9 @@
 import { useMemo, useState } from 'react';
+import LoadDetailModal from './LoadDetailModal';
+import { blankLoad, type Load } from '../data/loadsStore';
+import { seedLoadFromTrip } from '../data/tms/applyTrip';
+import { isoDate } from '../data/schedule';
+import { canDelete } from '../data/permStore';
 import { ROUTES, type AssetRoute } from '../data/fleet';
 
 /* Load Repository — the master list of USPS loads/routes (merged from Caleb's
@@ -25,6 +30,7 @@ export default function LoadRepositoryView() {
   const rows = useMemo(() => ROUTES.map(parse), []);
   const [q, setQ] = useState('');
   const [contract, setContract] = useState('ALL');
+  const [creating, setCreating] = useState<Load | null>(null);
   const contracts = useMemo(() => [...new Set(rows.map((r) => r.contract).filter(Boolean))].sort(), [rows]);
 
   const shown = useMemo(() => {
@@ -53,13 +59,15 @@ export default function LoadRepositoryView() {
           <thead>
             <tr>
               <th>Trip #</th><th>Origin → Destination</th><th>Freq</th>
-              <th>PU time</th><th>Departure</th><th>Delivery appt</th><th>Miles</th><th>Rate</th><th>Planning</th>
+              <th>PU time</th><th>Departure</th><th>Delivery appt</th><th>Miles</th><th>Rate</th><th>Planning</th><th></th>
             </tr>
           </thead>
           <tbody>
-            {shown.length === 0 && <tr><td colSpan={9} className="am-muted" style={{ textAlign: 'center', padding: 16 }}>No routes match.</td></tr>}
+            {shown.length === 0 && <tr><td colSpan={10} className="am-muted" style={{ textAlign: 'center', padding: 16 }}>No routes match.</td></tr>}
             {shown.map((r, i) => (
-              <tr key={`${r.tripCode}-${i}`}>
+              <tr key={`${r.tripCode}-${i}`} className="repo-row"
+                  title="Create a load from this trip"
+                  onClick={() => setCreating(seedLoadFromTrip(blankLoad('', isoDate(new Date())), r))}>
                 <td className="am-tractor">{r.tripCode || '—'}{r.tripLabel && <span className="repo-triplabel"> {r.tripLabel}</span>}</td>
                 <td>
                   <div className="repo-lane"><b>{r.origin || '—'}</b> → <b>{r.destination || '—'}</b></div>
@@ -72,11 +80,24 @@ export default function LoadRepositoryView() {
                 <td className="am-muted">{r.miles || '—'}</td>
                 <td>{r.rate || '—'}</td>
                 <td className="am-muted">{r.planning || '—'}</td>
+                <td><button className="am-clear repo-create">＋ Create load</button></td>
               </tr>
             ))}
           </tbody>
         </table>
       </div>
+      {/* PHASE 3: create a load straight from a repository row. The card opens
+          pre-filled and NOTHING is written until it's saved, so backing out
+          leaves no orphan. */}
+      {creating && (
+        <LoadDetailModal
+          tractor="" date={creating.date} canDel={canDelete()} initialTab="info" newLoad seedLoad={creating}
+          onSave={() => setCreating(null)}
+          onClear={() => setCreating(null)}
+          onCreated={() => setCreating(null)}
+          onClose={() => setCreating(null)}
+        />
+      )}
     </div>
   );
 }
