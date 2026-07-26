@@ -159,8 +159,11 @@ class ProxyFleetio implements FleetioClient {
 }
 
 export function samsaraClient(): SamsaraClient { void integrationConfig; return mockSamsara; }
-/* live connector when it's turned on AND Firebase is configured; otherwise the
-   bundled Fleetio export (which is your real fleet as of the last export). */
+/* FLEETIO IS DISCONNECTED — fleetioLiveEnabled() is hard-wired false in
+   integrations/config, so this ALWAYS returns the bundled export (your real
+   fleet as of the last export, plus any OOS marks made in the app). The
+   connector branch below is kept, unreachable, so reconnecting is a one-line
+   change: set FLEETIO_CONNECTED = true in integrations/config. */
 export function fleetioClient(): FleetioClient { return (firebaseEnabled && fleetioLiveEnabled()) ? proxyFleetio : mockFleetio; }
 const mockSamsara = new MockSamsara();
 const mockFleetio = new MockFleetio();

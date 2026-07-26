@@ -1,7 +1,5 @@
 import { useEffect, useState } from 'react';
 import { samsaraOrgs, setSamsaraOrgKey, geofenceSourceId, setGeofenceSourceId, maskKey, samsaraStatus, samsara, type ConnStatus, type SamsaraOrg } from '../integrations/samsara';
-import { fleetioClient, testFleetioProxy } from '../integrations/telematics';
-import { fleetioLiveEnabled, setFleetioLive } from '../integrations/config';
 import { FLEETIO_UNITS } from '../data/fleetUnits';
 import { maptilerKey, setMaptilerKey, maptilerMasked } from '../integrations/mapstyle';
 import { onChange, emitChange } from '../data/bus';
@@ -32,7 +30,6 @@ export default function SettingsView() {
   const [mtDraft, setMtDraft] = useState('');
   const status = samsaraStatus();
   const meta = STATUS_META[status];
-  const flt = fleetioClient();
   const orgs = samsaraOrgs();
   const geoSource = geofenceSourceId();
 
@@ -56,28 +53,8 @@ export default function SettingsView() {
     setResetMsg(`✓ Board reset — cleared ${loads} calendar load${loads === 1 ? '' : 's'} and restored ${trucks} bare trucks (tractor + make only, no drivers/terminal/status). Refresh and the board will match a clean fleet.`);
   }
 
-  /* Fleetio live-sync toggle + connectivity test */
-  const [fltLive, setFltLive] = useState<boolean>(() => fleetioLiveEnabled());
-  const [fltTest, setFltTest] = useState<{ busy: boolean; msg: string; ok?: boolean }>({ busy: false, msg: '' });
-  function toggleFltLive(on: boolean) { setFleetioLive(on); setFltLive(on); emitChange(); }
-  async function testFlt() {
-    setFltTest({ busy: true, msg: '' });
-    const r = await testFleetioProxy();
-    let msg: string;
-    if (!r.ok) {
-      msg = `✕ ${r.error}`;
-    } else {
-      msg = `✓ Connected — ${r.count} vehicles read from Fleetio (In service ${r.inService} · Out of service ${r.outOfService}).`;
-      if (r.statusCounts && Object.keys(r.statusCounts).length) {
-        const breakdown = Object.entries(r.statusCounts)
-          .sort((a, b) => b[1] - a[1])
-          .map(([k, n]) => `${k}: ${n}`)
-          .join(' · ');
-        msg += `\nFleetio statuses → ${breakdown}`;
-      }
-    }
-    setFltTest({ busy: false, ok: r.ok, msg });
-  }
+  /* Fleetio is disconnected (integrations/config FLEETIO_CONNECTED) — no live
+     toggle and no connectivity test; the fleet is managed inside the app. */
 
   const [diag, setDiag] = useState<Diag | null>(null);
   const [diagBusy, setDiagBusy] = useState(false);
@@ -243,40 +220,30 @@ export default function SettingsView() {
         </div>
       </div>
 
-      {/* Fleetio — fleet loaded from the export; live auto-sync needs the connector */}
+      {/* Fleetio — DISCONNECTED. The fleet runs on the export + manual OOS marks. */}
       <div className="intg-card">
         <div className="intg-card-head">
           <div className="intg-card-title">
-            <span className="intg-status-dot" style={{ background: 'var(--green)' }} />
-            🛠 Fleetio <span className="intg-card-sub">Fleet loaded · live auto-sync pending</span>
+            <span className="intg-status-dot" style={{ background: 'var(--muted)' }} />
+            🛠 Fleetio <span className="intg-card-sub">Disconnected · fleet runs in the Asset Matrix</span>
           </div>
-          <span className="intg-badge">{flt.label}</span>
+          <span className="intg-badge">Not connected</span>
         </div>
         <p className="am-muted" style={{ fontSize: 12.5, maxWidth: 760 }}>
-          Your <b>{FLEETIO_UNITS.length} trucks</b> are loaded straight from the Fleetio vehicle export (odometer, make, and in/out-of-service),
-          so the Trucks list, Out-of-Service board, and matrix row-lock all run on your real fleet right now.
+          The Asset Matrix <b>no longer reads anything from Fleetio</b>. Your <b>{FLEETIO_UNITS.length} trucks</b> and their
+          in/out-of-service status stay exactly as they are — from the last vehicle export plus any changes you make here.
+          Nothing is ever written back to Fleetio.
         </p>
         <div className="intg-feature-grid">
-          <IntgFeature icon="📇" title="Truck roster" desc="Every Fleetio unit is a truck profile — imported unrated, rate them manually." />
-          <IntgFeature icon="🛞" title="Odometer & make" desc="Per-unit odometer + make from the export — drives the A→D rating you set." />
-          <IntgFeature icon="⛔" title="In / out of service" desc="Out-of-service & in-shop units are blocked from matrix assignment." />
+          <IntgFeature icon="📇" title="Truck roster" desc="Your units live in the Asset Matrix now — add, edit, and rate them here." />
+          <IntgFeature icon="⛔" title="In / out of service" desc="Mark units out of service on the Trucks tab; OOS units stay blocked from assignment." />
+          <IntgFeature icon="🔌" title="No API calls" desc="The connection is off in code — no token is used and nothing is pulled on any browser." />
         </div>
-        <div className="intg-live-row">
-          <label className="samsara-geo-pick" style={{ fontSize: 13 }}>
-            <input type="checkbox" checked={fltLive} onChange={(e) => toggleFltLive(e.target.checked)} />
-            <b>Live Fleetio sync</b> — read <b>make &amp; in/out-of-service</b> from Fleetio (through the connector). <b>Odometers are not pulled</b> — they stay as you set them.
-          </label>
-          <button type="button" className="am-clear" disabled={fltTest.busy} onClick={testFlt}>{fltTest.busy ? 'Testing…' : '🔌 Test connection'}</button>
+        <div className="intg-mock-note">
+          <b>Fleetio is disconnected.</b> The read-only connector is still deployed but idle, and you can safely
+          delete or rotate the API key on Fleetio's side — the app never calls it. Service status is now yours to
+          manage on <b>Fleet → Trucks</b> (the ⛔ / ↩ buttons on each row). Say the word if you want it reconnected.
         </div>
-        {fltTest.msg && <div className="am-notice" style={{ color: fltTest.ok ? 'var(--green)' : 'var(--red)', marginTop: 6 }}>{fltTest.msg}</div>}
-        {fltLive
-          ? <div className="intg-mock-note" style={{ borderColor: 'var(--green)' }}>Live sync is <b>ON</b> — the app reads from the Fleetio connector; if it's ever unreachable it falls back to the export automatically (nothing breaks).</div>
-          : <div className="intg-mock-note">
-              <b>To turn on live sync:</b> deploy the read-only connector once, then flip the switch above.
-              Get a read-only <b>API token</b> + <b>Account token</b> from Fleetio → <b>Account Settings → Fleetio API Keys</b>,
-              add them as the repo secrets <code>FLEETIO_API_TOKEN</code> / <code>FLEETIO_ACCOUNT_TOKEN</code>, run the
-              <b> “Deploy Asset Functions” </b> action, then <b>Test connection</b> here and switch it on. Until then the app runs on the export.
-            </div>}
       </div>
     </div>
   );
