@@ -11,7 +11,7 @@ import { loadFleet, saveTruck } from '../data/fleetStore';
 import { loadTrailers } from '../data/trailersStore';
 import { listAddresses } from '../data/addressStore';
 import { routingProvider } from '../integrations/routing';
-import { rateConParser, applyRateCon } from '../integrations/ratecon';
+import { rateConParser } from '../integrations/ratecon';
 import { LOAD_STATUS_LABEL, type Assignment } from '../data/schedule';
 import AssignmentsSection from './AssignmentsSection';
 import MilestonesTab from './MilestonesTab';
@@ -22,6 +22,8 @@ import ExceptionsTab from './ExceptionsTab';
 import { fetchExceptions, openExceptions } from '../data/tms/exceptionsStore';
 import { onChange } from '../data/bus';
 import NotesTab from './NotesTab';
+import RateConReview from './RateConReview';
+import { parseRateCon, type RateConProposal, type RateConPatch } from '../data/tms/rateconParse';
 import {
   fetchNotes, noteCount, lockStateOf, acquireLock, heartbeat, releaseLock,
   forceUnlock, requestUnlock, LOCK_HEARTBEAT_MS,
@@ -54,7 +56,6 @@ export default function LoadDetailModal({ tractor, date, assignment, canDel, ini
   const [tab, setTab] = useState<Tab>(initialTab ?? 'info');
   const [notice, setNotice] = useState('');
   const [autoFilled, setAutoFilled] = useState<Set<string>>(new Set());
-  const [verify, setVerify] = useState<{ filled: string[]; confidence: string } | null>(null);
   const prevTrucks = useRef<string[]>(legTrucks(l));
   const f = <K extends keyof Load>(k: K, v: Load[K]) => setL((p) => ({ ...p, [k]: v }));
 
@@ -113,21 +114,43 @@ export default function LoadDetailModal({ tractor, date, assignment, canDel, ini
   useEffect(() => onChange(() => setLock(lockStateOf(loadById(l.id) ?? l))), [l.id, l]);
   const readOnly = lock.readOnly;
 
-  /* rate-con drop → parse → apply as a highlighted, must-verify suggestion */
+  /* PHASE 8 — rate-con drop → parse → REVIEW SCREEN. The parse writes nothing
+     and does not even touch the form: the proposal goes on screen field by
+     field, and only "Apply" moves anything onto the load. */
+  const [proposal, setProposal] = useState<RateConProposal | null>(null);
+  const [rcFile, setRcFile] = useState<File | null>(null);
   async function onRateCon(file: File) {
     setNotice('⏳ Reading the rate con…');
     try {
       const res = await rateConParser().parse(file);
-      if (res.keys.length === 0) { setNotice('No fields recognized in that PDF — fill the load in manually.'); return; }
-      const { load, changed } = applyRateCon(l, res.fields);
-      setL(load);
-      setAutoFilled(new Set(changed));
-      setVerify({ filled: res.filled, confidence: res.confidence });
+      const p = parseRateCon(res.text || '');
+      setRcFile(file);
+      setProposal(p);
       setNotice('');
       setTab('info');
     } catch {
       setNotice('Could not read that file — is it a PDF rate con? You can still fill the load in manually.');
     }
+  }
+
+  function applyProposal(patch: RateConPatch) {
+    setL((prev) => {
+      const next = { ...prev, ...(patch.load as Partial<Load>) } as Load;
+      if (patch.stops.length) {
+        const stops = prev.stops.slice();
+        for (const ps of patch.stops) {
+          let i = stops.findIndex((s) => s.type === ps.type);
+          if (i < 0) { stops.push(blankStop(ps.type as LoadStop['type'], stops.length + 1)); i = stops.length - 1; }
+          stops[i] = { ...stops[i], ...ps };
+        }
+        next.stops = stops;
+      }
+      return next;
+    });
+    setAutoFilled(new Set(Object.keys(patch.load)));
+    setProposal(null); setRcFile(null);
+    const n = patch.applied.length + patch.stops.length;
+    setNotice(`✓ Applied ${n} item${n === 1 ? '' : 's'} from the rate con — nothing is saved until you press Save.`);
   }
 
   async function persist(next?: Partial<Load>): Promise<Load> {
@@ -138,7 +161,6 @@ export default function LoadDetailModal({ tractor, date, assignment, canDel, ini
     return saved;
   }
   async function saveAndClose() {
-    if (verify) { setNotice('⚠ Verify the auto-filled fields, then click “✓ Verified” before saving.'); setTab('info'); return; }
     /* new/unassigned loads can be saved with NO route — the point is to start the
        schedule entry with a truck + drivers + date and fill the rest in later.
        Existing (cell-bound) loads still need a route to stay on the board. */
@@ -209,22 +231,12 @@ export default function LoadDetailModal({ tractor, date, assignment, canDel, ini
         )}
         {warning && <div className="am-dblbook" style={{ marginBottom: 6 }}>{warning}</div>}
         {notice && <div className="am-notice">{notice}</div>}
-        {verify && (
-          <div className="ratecon-verify">
-            <div className="ratecon-verify-head">
-              📄 Auto-filled from rate con <span className={`ratecon-conf ${verify.confidence}`}>{verify.confidence} confidence</span>
-            </div>
-            <div className="ratecon-verify-body">
-              Review the highlighted fields — {verify.filled.join(' · ')}. Nothing saves until you confirm.
-            </div>
-            <div className="ratecon-verify-actions">
-              <button className="am-save" onClick={() => { setVerify(null); setAutoFilled(new Set()); }}>✓ Verified — looks right</button>
-              <button className="am-clear" onClick={() => { setVerify(null); setAutoFilled(new Set()); }}>Dismiss</button>
-            </div>
-          </div>
-        )}
 
-        {tab === 'info' && <InfoTab l={l} f={f} onLegs={onLegs} canDel={canDel} assignable={!!(newLoad || seedLoad)} autoFilled={autoFilled} onRateCon={onRateCon} onNotice={setNotice} onClear={() => { clearLoadCell(tractor, date); onClear(); }} />}
+        {tab === 'info' && proposal && (
+          <RateConReview proposal={proposal} load={l} file={rcFile}
+            onApply={applyProposal} onCancel={() => { setProposal(null); setRcFile(null); }} />
+        )}
+        {tab === 'info' && !proposal && <InfoTab l={l} f={f} onLegs={onLegs} canDel={canDel} assignable={!!(newLoad || seedLoad)} autoFilled={autoFilled} onRateCon={onRateCon} onNotice={setNotice} onClear={() => { clearLoadCell(tractor, date); onClear(); }} />}
         {tab === 'stops' && <StopsTab l={l} setL={setL} persist={persist} />}
         {tab === 'milestones' && <MilestonesTab load={l} onStatus={() => setL((p) => ({ ...p }))} />}
         {tab === 'docs' && <DocumentsTab load={l} onLoad={(n) => setL(n)} />}

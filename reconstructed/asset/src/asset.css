@@ -1136,3 +1136,30 @@
 .am-cellnote { font-size: 10px; line-height: 1.35; color: var(--muted); margin-top: 3px;
   max-height: 26px; overflow: hidden; text-overflow: ellipsis; }
 .am-cellnote.late { color: var(--amber); font-weight: 600; }
+
+/* ---------------------------------------------------------------- PHASE 8
+   the rate-con review screen. It is a document about a document: readable rows,
+   an explicit take/skip on each, and variances called out before anything else. */
+.rc-wrap { display: flex; flex-direction: column; gap: 10px; }
+.rc-head { display: flex; flex-direction: column; gap: 3px; }
+.rc-head .am-muted { font-size: 11.5px; }
+.rc-section { font-size: 10px; font-weight: 800; letter-spacing: .05em; text-transform: uppercase;
+  color: var(--muted); margin-top: 4px; }
+.rc-sectionsub { font-size: 11.5px; max-width: 640px; }
+.rc-scroll { overflow-x: auto; }
+.rc-table { font-size: 11.5px; min-width: 760px; }
+.rc-table td, .rc-table th { padding: 4px 7px; vertical-align: top; }
+.rc-take { display: inline-flex; align-items: center; gap: 5px; font-size: 10.5px;
+  font-weight: 700; color: var(--muted); white-space: nowrap; cursor: pointer; }
+.rc-label { font-weight: 600; }
+.rc-value { font-weight: 700; }
+.rc-target { font-size: 10.5px; }
+.rc-note { font-size: 10.5px; max-width: 260px; }
+.rc-conf { font-size: 9.5px; font-weight: 800; text-transform: uppercase; letter-spacing: .03em;
+  padding: 1px 6px; border-radius: 5px; border: 1px solid var(--border); }
+.rc-conf.high { color: var(--green); border-color: rgba(46,160,67,0.4); }
+.rc-conf.medium { color: var(--amber); border-color: rgba(224,160,61,0.4); }
+.rc-conf.low { color: var(--red); border-color: rgba(214,84,84,0.4); }
+.rc-variance { background: rgba(214,84,84,0.08); }
+.rc-actions { display: flex; align-items: center; gap: 11px; flex-wrap: wrap; margin-top: 4px; }
+.rc-actions .am-muted { font-size: 11.5px; }
