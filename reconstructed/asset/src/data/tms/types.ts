@@ -128,6 +128,22 @@ export function isRequiredEvent(event: MilestoneEvent): boolean {
    Per-customer overrides come later — the spec parks that for a future phase. */
 export const DEFAULT_FREE_TIME_MINUTES = 120;
 
+/* ---- structured late reasons (Phase 6) ----
+   Required whenever a Pickup/Delivery Completed milestone is saved with
+   timing = Late. This is what finally populates the OTP/OTD "Top fail reasons"
+   row, which has nothing behind it today. 'Other' additionally requires
+   lateReasonDetail — a free-text escape hatch with no detail is how a reason
+   taxonomy rots into noise. */
+export const LATE_REASONS = [
+  'Held at Shipper', 'Receiver / Dock Congestion', 'Driver HOS',
+  'Driver Availability / No Show', 'Breakdown — Tractor', 'Breakdown — Trailer / Tire',
+  'Traffic / Accident', 'Weather', 'Recovery / Contractor Failure',
+  'Unauthorized Stop', 'Fuel / DEF Stop', 'Driver Switch',
+  'GPS / Routing Error', 'Yard / Shuttle Delay', 'Late Slip Issued', 'Other',
+] as const;
+export type LateReason = (typeof LATE_REASONS)[number];
+export const lateReasonNeedsDetail = (r: string): boolean => r === 'Other';
+
 /* ---- documents (Phase 4) ---- */
 export const DOC_TYPES = [
   'BOL', 'POD', 'RATE_CON', 'LUMPER_RECEIPT',
@@ -168,33 +184,57 @@ export function blankRefs(): LoadRefs {
   return { customerRefConf: '', shipmentBol: '', po: '', pro: '', pickupNumber: '', deliveryNumber: '' };
 }
 
-/* PHASE 9 PLACEHOLDER. The financials spec was not included in the brief, so
-   this is the minimal forward-compatible shape carrying what the legacy record
-   already knows (rate + derived CPM). Phase 9 extends it — settlement splits,
-   accessorials, fuel surcharge, per-leg pay. Nothing computes off it yet. */
+/* PHASE 9 — financials. Deliberately narrow: rate and fuel surcharge only. No
+   carrier pay, driver settlement, or accessorials yet; the point is honest
+   revenue and CPM, not a settlement engine.
+   fscAmount, revenue, totalMiles and cpm are COMPUTED (see the derivations in
+   Phase 9) — never typed in by hand. */
+export const FSC_TYPES = ['Flat Amount', 'Per Mile', 'Invoice %'] as const;
+export type FscType = (typeof FSC_TYPES)[number];
+
 export interface LoadFinancials {
-  rate: number | null;            // total revenue on the load (legacy `rate`)
-  linehaul: number | null;
-  fuelSurcharge: number | null;
-  accessorials: number | null;
-  totalRevenue: number | null;
-  ratePerMile: number | null;     // legacy `cpm`
+  rate: number | null;            // linehaul / flat rate
+  fscType: FscType | '';
+  fscRate: number | null;         // the input: dollars, $/mi, or %
+  fscAmount: number | null;       // computed
+  revenue: number | null;         // computed = rate + fscAmount
+  loadedMiles: number | null;
+  emptyMiles: number | null;
+  totalMiles: number | null;      // computed = loaded + empty
+  cpm: number | null;             // computed = revenue / loadedMiles
+  currency: string;               // default USD
 }
 export function blankFinancials(): LoadFinancials {
-  return { rate: null, linehaul: null, fuelSurcharge: null, accessorials: null, totalRevenue: null, ratePerMile: null };
+  return {
+    rate: null, fscType: '', fscRate: null, fscAmount: null, revenue: null,
+    loadedMiles: null, emptyMiles: null, totalMiles: null, cpm: null, currency: 'USD',
+  };
 }
 
-/* PHASE 7 PLACEHOLDER. Same story — the lock spec wasn't included. This is the
-   conservative shape (who holds it, since when, why) so Phase 0 docs already
-   carry the field and Phase 7 doesn't need a second migration. */
+/* PHASE 7 — record lock. Five people share this board, so a load being edited is
+   claimed. There is deliberately NO `locked` boolean: a lock EXISTS when
+   lockedBy is set AND heartbeatAt is fresh. A stale heartbeat past the TTL is
+   the same as no lock, which is what makes a closed laptop or a dropped
+   connection self-heal instead of stranding the record forever. */
+export const LOCK_TTL_MS = 5 * 60 * 1000;        // lock expires 5 min after the last heartbeat
+export const LOCK_HEARTBEAT_MS = 60 * 1000;      // refreshed every 60s while the modal is open
+
 export interface LoadLock {
-  locked: boolean;
-  lockedBy: string;
+  lockedBy: string;               // email
+  lockedByName: string;
   lockedAt: string;
-  reason: string;
+  heartbeatAt: string;
 }
 export function blankLock(): LoadLock {
-  return { locked: false, lockedBy: '', lockedAt: '', reason: '' };
+  return { lockedBy: '', lockedByName: '', lockedAt: '', heartbeatAt: '' };
+}
+
+/* Is the lock live right now? Anything stale is treated as free. `now` is
+   injectable so the rules-parity tests and the UI agree on the same instant. */
+export function lockIsActive(lock: LoadLock | undefined, now: number = Date.now()): boolean {
+  if (!lock || !lock.lockedBy) return false;
+  const beat = Date.parse(lock.heartbeatAt || lock.lockedAt || '');
+  return Number.isFinite(beat) && now - beat < LOCK_TTL_MS;
 }
 
 /* ------------------------------------------------------- the load header ---- */
@@ -235,6 +275,11 @@ export interface TmsLoad extends Partial<Omit<LegacyLoad, 'weight'>> {
   parentLoadId: string;           // set when spawned from an exception (Phase 5)
   lock: LoadLock;
 
+  /* Denormalized for board display only — the authoritative copy lives on the
+     milestone that produced it (Phase 6). Read-only everywhere else: never edit
+     this directly, it is rewritten whenever a Late milestone is saved. */
+  lastLateReason: LateReason | '';
+
   createdBy: string; createdAt: string;
   updatedBy: string; updatedAt: string;
 }
@@ -262,6 +307,17 @@ export interface LoadAssignment extends Stamps {
   loadSheetSentAt: string;
   otpResult: TimingResult;
   otdResult: TimingResult;
+
+  /* Phase 5 close-out. NEEDS YOUR CONFIRMATION: the spec says a leg abandoned to
+     an exception becomes "Cancelled/TONU", but that is not one of the 11 board
+     statuses, and those are fixed because they drive the legend colors. Rather
+     than quietly adding a 12th status, a cancelled leg keeps its last real
+     legStatus and carries these two fields instead — the leg reads as
+     "cancelled at At Shipper", which is more truthful than erasing where it got
+     to anyway. CANCELLED_TONU still exists where the spec puts it, on the load's
+     billingStatus. Say the word if you'd rather have the 12th status. */
+  cancelled: boolean;
+  cancelReason: string;
 }
 
 /* loads/{id}/stops/{stopId} — Phase 3 */
@@ -325,6 +381,10 @@ export interface LoadMilestone extends Stamps {
   sourceDetail: string;           // driver name, dispatcher email, geofence name
   notificationSent: boolean;
   notificationSentAt: string;
+  /* Phase 6: required when this is a *Completed rung and timing = Late.
+     Enforced at save time, not just prompted for. */
+  lateReason: LateReason | '';
+  lateReasonDetail: string;
 }
 
 /* loads/{id}/documents/{docId} — Phase 4 */
@@ -358,11 +418,25 @@ export interface LoadException extends Stamps {
   resolved: boolean;
 }
 
-/* loads/{id}/notes/{noteId} — Phase 7 */
+/* loads/{id}/notes/{noteId} — Phase 7.
+   SOFT DELETE ONLY: deletedAt hides a note, nothing removes the document. A
+   dispatch note is evidence of what someone was told and when. */
+export const NOTE_CATEGORIES = [
+  'General', 'Late Reason', 'Trailer', 'Appointment', 'Driver Comms', 'Customer Comms',
+] as const;
+export type NoteCategory = (typeof NOTE_CATEGORIES)[number];
+
 export interface LoadNote extends Stamps {
   id: string;
-  body: string;
+  body: string;                   // required
+  authorId: string;
+  authorName: string;
+  authorEmail: string;
+  category: NoteCategory;
   pinned: boolean;
+  editedAt: string;
+  editedBy: string;
+  deletedAt: string;              // '' = live; set = soft-deleted
 }
 
 /* loads/{id}/audit/{eventId} — append-only change log.
@@ -392,7 +466,7 @@ export function blankTmsLoad(id: string, init?: Partial<TmsLoad>): TmsLoad {
     status: 'unassigned', statusManualOverride: false, billingStatus: 'NOT_READY',
     equipment: '', weight: null, commodity: '', isUspsContract: false,
     refs: blankRefs(), financials: blankFinancials(),
-    dispatchNotes: '', parentLoadId: '', lock: blankLock(),
+    dispatchNotes: '', parentLoadId: '', lock: blankLock(), lastLateReason: '',
     createdBy: '', createdAt: '', updatedBy: '', updatedAt: '',
     ...init,
   };
