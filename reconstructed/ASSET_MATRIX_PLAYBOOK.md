@@ -62,9 +62,21 @@ Newest first. **Current live version is flagged.** Use the SHA to revert.
 
 | Version | Commit | Date | What it added |
 |--------|--------|------|----------------|
-| v0.10.0 *(staged on branch — not yet live)* | — | 2026-07-24 | **Shared user roster:** everyone who signs in auto-populates the Roles tab (first shared-Firestore data). New sign-ins appear with the FMT default (edit, no delete); the owner just assigns a role. No more typing emails by hand |
+| **v0.43.0 ← LIVE** | `c5f5462` | 2026-07-26 | **Phase 10 — trailers + cleanup.** Trailer combobox (warns, never blocks), inline "+ Add trailer", CSV import; the ten stale-UI fixes incl. the merged Fleet page, the enum Booking Authority, Booking Terminal on the load, clickable Loads ledger, and destructive tools moved to a hidden `#admin` |
+| v0.42.0 | `2346633` | 2026-07-26 | **Phase 9 — financials + Ready For Accounting.** Computed rate/FSC/revenue/CPM strip, miles from stops, Billing work queue with per-row blocked reason + CSV, authority/terminal splits on every report |
+| v0.41.0 | `3a5ca6f` | 2026-07-26 | **Phase 8 — rate con parsing.** USPS trip-ID engine (all 9 fixtures), labeled-field extraction, field-by-field review screen, Load Repository variance flags, source PDF auto-attached as RATE_CON |
+| v0.40.0 | `6aa6e5e` | 2026-07-26 | **Phase 7 — notes + record locking.** Threaded categorised notes (soft delete only), inline note on the board cell, heartbeat lock enforced in Firestore rules with Ask-to-close and audited Force unlock |
+| v0.39.0 | `db2533d` | 2026-07-26 | **Phase 6 — OTP/OTD derived.** The manual "+ Log Shipment" form deleted; every row read from milestones, Pending excluded from the percentage, Late Reasons report by reason/driver/terminal/customer |
+| v0.38.0 | `9d82a53` | 2026-07-26 | **Phase 5 — exceptions + replacement loads.** Exception log, preview-then-commit spawn carrying stops and appointments forward (never actuals), leg cancelled with reason, lineage banners both ways |
+| v0.37.0 | `ad87912` | 2026-07-26 | **Phase 4 — documents + billing gate.** Ready For Accounting unreachable without BOL + POD, enforced in the rules; board paperwork chips; `tools/test_rules.py` regression suite |
+| v0.36.0 | `df05439` | 2026-07-26 | **Phase 3 — stops + Load Repository.** Appointment windows, trip typeahead with a diff preview, create-a-load from a repository row |
+| v0.35.0 | `4eeb544` | 2026-07-26 | **Phase 2 — milestone engine.** Ordered ladder per stop, mandatory source tag, detention, Samsara variance, board status derived from milestones, one-tap ⚡ fast-log |
+| v0.34.0 | `f73366b` | 2026-07-26 | **Phase 1 — multi-leg assignments.** A load carries 2+ legs, each with its own truck/trailer/drivers/authority; the board draws every leg with a "leg 1 of 2" chip |
+| v0.33.1 | `edc158f` | 2026-07-26 | **Phase 0 — the TMS data model.** Schema v2, audit stamping, append-only audit log, additive migration with a review screen, enumerated Firestore rules, composite indexes |
+| v0.32.0 | `af90ac0` | 2026-07-24 | Fleetio disconnected — the sync is off, the July-24 service statuses stay on the Trucks page |
+| v0.10.0 | — | 2026-07-24 | **Shared user roster:** everyone who signs in auto-populates the Roles tab (first shared-Firestore data). New sign-ins appear with the FMT default (edit, no delete); the owner just assigns a role. No more typing emails by hand |
 | v0.9.0 *(staged on branch — not yet live)* | `12ae216` | 2026-07-24 | Fleet Map rebuilt on **MapLibre GL**: real vector basemap (OpenFreeMap, no key), native zoom/pan, truck markers that glide as GPS updates, weather/traffic/geofence layers, base-map switcher with Satellite/Hybrid/Terrain gated on a MapTiler key |
-| **v0.8.0 ← LIVE** | `1476a69` | 2026-07-24 | Samsara integration scaffold (adapter + Integrations page), HOS-gated next-route suggestions on the calendar, first Samsara-style Fleet Map (SVG), geofence import, Drivers→"Driver Availability" rename |
+| v0.8.0 | `1476a69` | 2026-07-24 | Samsara integration scaffold (adapter + Integrations page), HOS-gated next-route suggestions on the calendar, first Samsara-style Fleet Map (SVG), geofence import, Drivers→"Driver Availability" rename |
 | v0.7.0 | `7138e96` | 2026-07-24 | Navigation overhaul: collapsible left side-panel nav, minimal top bar, universal search replaced with separate Driver / Team / Route look-up filters |
 | v0.6.0 | `423ec8f` | 2026-07-23 | Loads Phase 3: first Fleet Map, Out-of-Service (Fleetio) board + matrix row-lock, rate-con PDF auto-fill |
 | v0.5.x | `254437f` | 2026-07-23 | Loads Phase 2: split / relay loads, Financials analytics (Revenue/CPM, by customer, by truck, driver miles) |
@@ -76,15 +88,32 @@ Newest first. **Current live version is flagged.** Use the SHA to revert.
 | — | `9e7af26` | 2026-07-20 | Imported all USPS routes from Bravo (79 → 187) |
 | — | `6701ae5` | 2026-07-20 | Auth gate + Firebase hosting (deploy-ready base) |
 
-> **Known-good checkpoints to remember:** v0.6.0 (features complete, classic top-tab nav), v0.7.0 (new side-panel nav), v0.8.0 (Samsara scaffold — current).
+> **Known-good checkpoints to remember:** v0.32.0 (everything before the TMS
+> execution layer), v0.37.0 (the billing gate lands — the first version where
+> money depends on a rule), v0.43.0 (current).
 
 ---
 
 ## 4. Architecture (how it's built)
 
 - **Stack:** React 19 + TypeScript + Vite. Single-page app.
-- **Data today:** browser **localStorage** per device (demo-safe). Designed to
-  move to **Firestore** (shared, multi-user) — the write paths already exist.
+- **Data today:** **Firestore**, shared across the team, with localStorage as the
+  demo fallback (`window.__ASSET_FB__ = {}` forces demo mode). The board still
+  renders from the `assetSchedule` cell index; the TMS record hangs off
+  `loads/{id}` with subcollections for `assignments`, `stops`, `milestones`,
+  `documents`, `exceptions`, `notes` and an append-only `audit`.
+- **Migration posture — additive, always.** New schema is added ALONGSIDE the
+  legacy fields, never in place of them, and legacy `stops[]`/`segments[]` are
+  MIRRORED into subcollections rather than moved. Subcollection reads are
+  read-through: a real doc when one exists, otherwise synthesized from the legacy
+  array. That is why no phase ever required a migration to be usable.
+- **Every write is stamped** with `createdBy` / `createdAt` / `updatedBy` /
+  `updatedAt` (the signed-in email, ISO-8601 strings). `createdBy` is immutable
+  once set, enforced in the rules.
+- **Derived flags live on the load** (`missingBol`, `missingPod`,
+  `hasOpenException`, `noteCount`, `latestNote`) because a board cell cannot open
+  a subcollection per truck-day — and because Firestore rules cannot query one
+  either, which is what makes the billing gate enforceable.
 - **Auth:** Google sign-in, restricted to company domains. In demo/preview mode
   it runs without auth so the UI can be reviewed.
 - **Deploy pipeline:** push to `main` (or the working branch) → **GitHub Actions**
@@ -101,7 +130,15 @@ Newest first. **Current live version is flagged.** Use the SHA to revert.
   - `integrations/mapdata.ts` — weather + traffic (Fleet Map overlays)
   - `integrations/routing.ts` — lane miles / CPM
   - `integrations/documents.ts` — load documents (local now, Firebase-ready)
-  - `integrations/ratecon.ts` — rate-con PDF parsing
+  - `integrations/ratecon.ts` — rate-con PDF text extraction (pdf.js, no key)
+- **The TMS layer** (`src/data/tms/`): `types` (schema + enums), `stamp` (audit),
+  `migrate`, `assignmentsStore`, `stopsStore`, `milestonesStore`, `documentsStore`,
+  `exceptionsStore`, `notesStore` (+ locking), `rateconParse`, `performance`
+  (OTP/OTD), `financials`, `billing`.
+- **Two test harnesses:** `tools/test_rules.py` (33 Firestore-rules cases against
+  Google's rules-test API — no emulator needed) and `npm run test:tripids` (the
+  nine USPS trip-identifier fixtures, run against the shipped module so the test
+  cannot drift from the regex).
 
 ---
 
@@ -210,6 +247,225 @@ planned**. This is the map for deciding what to change.
 
 ---
 
+## 5A. The TMS Execution Layer — how to actually use it
+
+Phases 0–10 turned the board into an execution system. This section is the
+day-to-day how-to. The order below is the order the work happens.
+
+### The one idea that runs through all of it
+**Nothing parsed or inferred is written without a review screen, and nothing
+important is asserted without being enforced on the server.** The migration, the
+trip picker, the exception spawn and the rate-con reader all show you a preview
+first. The billing gate and the record lock are both enforced in
+`firestore.rules`, not just in the UI — because a rule that lives only in the
+browser is a suggestion.
+
+---
+
+### Booking a load
+
+Open a cell on the board, or press **➕ Create Load**.
+
+**Load Info** carries the shell: route name, customer, equipment, rate, FSC,
+weight, references, **Booking authority** (the five-entity picker) and **Booking
+terminal**. Authority and terminal are what let every report say *whose* revenue
+it is — a load without them disappears from its own company's numbers.
+
+**Assignments** is where the trucks go. One block per leg:
+
+- Leg 1 is the truck the board draws first. Its truck, trailer and drivers are
+  mirrored back onto the legacy fields, so nothing that reads the old shape
+  breaks.
+- Add a leg when a local shuttle hands off to an OTR team. Set each leg's stop
+  range. The board then draws the load on **both** truck rows with a "leg 1 of 2"
+  chip, so nobody reads them as two loads.
+- **An out-of-service truck blocks.** A driver availability problem only warns.
+  Equipment that cannot legally move is a hard stop; a person is a judgement call
+  and stays yours.
+
+**Trailer #** is a combobox. Type anything — free text always wins. It offers
+matches from the trailer list, fills in the type, warns if the trailer is In Shop
+or already on another unfinished load, and offers **+ Add trailer #53044** if the
+number is new. It never blocks the save.
+
+**Dropping a rate con** on the drop zone opens the review screen instead of
+filling the form. See below.
+
+### Running a load — the milestone ladder
+
+**Milestones** is the tab that moves the truck. Every stop has an ordered ladder:
+
+> En Route → At Pickup → Loading Started → Loading Completed → Detention Begin →
+> Detention Ended → Pickup Completed  *(deliveries mirror it)*
+
+Three things are enforced:
+
+1. **Order.** You cannot log Loading Completed before At Pickup.
+2. **A source on every rung** — 🚚 driver, 🖥 dispatch, 📡 Samsara. There is no
+   unsourced option, because without it you cannot tell a witnessed time from a
+   typed one, and every number downstream inherits that ambiguity.
+3. **A structured late reason** on any completion that lands after the
+   appointment. It will not save without one.
+
+**The board status follows automatically.** You should never type a status again.
+Covered → Dispatched → En Route → At Shipper/At Yard → At Receiver → Delivered →
+Completed all derive from what has been logged. **Completed only becomes
+available once the load is billable** — a load does not end at delivered, it ends
+when accounting can invoice it.
+
+**The ⚡ on a board cell** logs the next required milestone in one tap, with the
+late-reason picker inline. That is the fast path for a dispatcher on the phone.
+
+**Detention** computes from Detention Begin/Ended. If those were not logged it
+falls back to arrival and departure and *says* it inferred the number.
+
+### Stops and appointments
+
+**Stops** holds the appointment date, window open, window close and a Confirmed
+flag per stop. The **trip search** pulls a route out of the Load Repository and
+shows you a **diff** — what the repository holds against what the load has —
+with anything that would overwrite your typing marked as a conflict and switched
+off by default. Apply writes only what you left on.
+
+### When a run breaks — exceptions
+
+**Exceptions** → **Log an exception**. Pick what happened, which leg, and the stop
+a replacement would start from, and write a reason (required — it is what the
+customer gets told).
+
+**Preview replacement load** shows exactly what would be created:
+
+- **Carries forward:** customer, authority, terminal, equipment, commodity,
+  weight, references, trip numbers, rate, and every stop from the break point on
+  **with its appointment window**.
+- **Does not carry:** arrival/departure actuals, logged milestones and detention,
+  truck/drivers/trailer, documents. The replacement truck has not been anywhere,
+  and copying an arrival it never made would forge the on-time record.
+
+Confirm and you get a new load in the **Unassigned tray** (spawning creates the
+work; dispatch decides who runs it), the original leg marked cancelled with your
+reason, a banner on each load pointing at the other, and a **⚠** on the board.
+
+If no pickup carries forward, the preview says so — a recovery load usually has
+to go *collect* the freight from wherever the truck stopped, and that address is
+not in the plan. It will not invent one.
+
+### Paperwork and billing
+
+**Documents** is where the money gets unlocked. The banner at the top is the
+first thing on the tab and it names the missing document rather than just
+refusing.
+
+- Files are named `{load#}-{DOCTYPE}-{MM-DD-YYYY}.{ext}` automatically.
+- BOL and POD default to **Withhold** (they do not ship with the invoice);
+  everything else defaults to **Deliverable**. Both are per-document editable.
+- **A load cannot reach Ready For Accounting without a BOL and a POD.** Uploading
+  the last missing one lifts the status by itself.
+- Delete is restricted — FMT can never delete a document.
+
+**The billing state machine**
+
+```
+NOT_READY
+   ↓ final Delivery Completed logged        (automatic)
+MISSING_DOCS
+   ↓ BOL + POD both attached                (automatic)
+READY_FOR_ACCOUNTING
+   ↓ by hand
+INVOICED  →  PAID
+side branches, any state: ON_HOLD · CANCELLED_TONU
+```
+
+**Financials → Billing** is the queue between delivered and invoiced. Grouped by
+status with counts and revenue, filterable by authority / terminal / customer /
+date, and every row says what is holding it up in the words you would use on the
+phone — "waiting on POD", not "missing docs". Click a row to open the load.
+**Export CSV** is the handoff artifact until invoicing lives in here.
+
+### Reading a rate con
+
+Drop the PDF on **Load Info**. You get a review screen: every field with its
+value, its target, a confidence, and a **Take / Skip** toggle.
+
+- **USPS documents** are recognised by their trip identifier. The separator is
+  `-` or `_`, one identifier can carry several trip numbers, and the prefix is
+  not always FA2D3 — `FA2D3_1019_071426_1` reads as route **FA2D3** with trips
+  **1019 / 071426 / 1**. Anything that does not match is listed as *unrecognized*
+  rather than guessed at.
+- If the trip is in the Load Repository, any **disagreement** on miles, rate band
+  or pickup time is listed first and starts switched **off**. A rate con that
+  contradicts the contract is a conversation, not a value to accept.
+- The source PDF is attached as **RATE CON / Deliverable** either way.
+- A scan with no text layer is called a scan. There is no OCR; it will not guess
+  at an image.
+
+### On-time performance
+
+**OTP / OTD** takes no input. Every row is derived from the loads and their
+milestones, so the on-time number and the board can never tell two stories.
+**Unlogged is not on-time** — a stop nobody logged stays out of the percentage,
+and the UNLOGGED count next to it is how you tell "we were late" from "nobody
+logged it". The **Late Reasons report** groups by reason, driver, terminal or
+customer, and a load that was late out AND late in counts as two failures with
+two causes.
+
+### Notes and who has the record
+
+**Notes** is a thread, not a text box. Every note carries the author, the time and
+a category; Late Reason notes render in the warning colour. **Notes are never
+deleted** — hiding one keeps the document and logs who hid it. The board cell
+shows the most recent note inline with a 💬 count, so nobody has to open a card
+to find out the receiver called.
+
+**Locking.** Opening a load claims it. The card beats every 60 seconds and lets
+go on close, on save and on the tab closing; five minutes of silence frees it, so
+a closed laptop heals itself. A second person gets a read-only card naming the
+holder, an **Ask them to close it** button (which posts in the thread they are
+already looking at), and — for Owner / FMT Lead / US Ops — a **Force unlock**
+that is audited with the name of the person whose claim was broken. It is
+enforced in the rules, so the second tab cannot save either.
+
+### Who can do what
+
+| | Owner | FMT Lead | US Ops | FMT |
+|---|---|---|---|---|
+| Edit loads, log milestones, upload docs, post notes | ✔ | ✔ | ✔ | ✔ |
+| Delete a load / driver / document / exception | ✔ | ✔ | ✔ | ✘ |
+| Force a record lock | ✔ | ✔ | ✔ | ✘ |
+| Assign roles | ✔ | ✘ | ✘ | ✘ |
+| Hidden `#admin` page | ✔ | ✘ | ✘ | ✘ |
+| Delete a note or an audit entry | ✘ | ✘ | ✘ | ✘ |
+
+The last row is not a mistake. Notes soft-delete and audit entries are
+append-only for everyone, owner included.
+
+---
+
+## 5B. Running the safety checks
+
+**Before every rules deploy:**
+
+```bash
+cd reconstructed/asset
+python3 tools/test_rules.py     # 33 cases against Google's rules-test API
+```
+
+It evaluates the rules **source**, so it runs before publishing rather than
+after. It covers the billing gate, the record lock, FMT's delete ban, the
+append-only audit and owner-only role assignment.
+
+**The trip-ID fixtures:**
+
+```bash
+npm run test:tripids            # the 9 USPS identifiers + an in-document scan
+```
+
+**Deploying rules** is a separate manual workflow (`deploy-asset-rules`,
+workflow_dispatch only). Rules must never deploy as a side effect of a push.
+
+
+---
+
 ## 6. Integrations roadmap (what's stubbed vs. what's needed)
 
 | Integration | Powers | State | To go live |
@@ -275,9 +531,24 @@ today and the full Samsara look the moment you add one free key.
 
 ## 8. Open items / next up
 
+**From the TMS build (see `asset/docs/TESTING-GUIDE.md` for the full list):**
+
+- **Run the migration on live data.** Preview it, read the conflicts, take a
+  Firestore export first.
+- **Deploy the rules.** `python3 tools/test_rules.py` → then the manual
+  `deploy-asset-rules` workflow. The billing gate and the record lock are only
+  enforced once those rules are published.
+- **OCR for scanned rate cons** — not built. The review screen says so instead of
+  guessing. Needs a vision model behind the existing interface, plus a key.
+- **Real rate cons** — drop ten of yours and tell me which fields came back wrong.
+  The extractor can only be tuned against documents I have seen.
+- **Invoicing** — the Billing queue and its CSV are the handoff artifact. Actual
+  invoice generation is not built.
+
+**Older items still open:**
+
 - **Fleet Map redesign** — pick Option A / B / C above; I'll build it.
-- **Dispatch deep-dive** — you want to revisit the dispatch piece (driver sheets,
-  send flow). Parked for the next session.
+- **Dispatch deep-dive** — driver sheets and the send flow.
 - **Samsara backend** — wire the real HOS + GPS + geofence API behind the adapter
   (you're doing the backend; front-end is ready).
 - **Equipment + customer lists** — provide the LoadStop van/equipment types and
@@ -290,5 +561,6 @@ today and the full Samsara look the moment you add one free key.
 
 ---
 
-*Last updated: 2026-07-24 · live = v0.8.0 (`1476a69`); v0.9.0 (`12ae216`) + v0.10.0
-staged on branch awaiting deploy. Ask me to update this doc whenever we ship a new version.*
+*Last updated: 2026-07-26 · live = **v0.43.0** (`c5f5462`) — the TMS Execution
+Layer, Phases 0–10, shipped and deployed. Ask me to update this doc whenever we
+ship a new version.*
