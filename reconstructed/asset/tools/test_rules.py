@@ -37,6 +37,7 @@ FMT = "fmt@ghlogisticsllc.com"            # fmt  (edit-only, never deletes)
 OUTSIDER = "someone@gmail.com"
 
 NOW = "2026-07-26T12:00:00.000Z"
+NOW_MS = 1785412800000        # the same instant, in epoch millis (what rules can read)
 
 
 def token() -> str:
@@ -136,6 +137,42 @@ CASES = [
          path="/databases/(default)/documents/loads/L2", who=auth(OWNER),
          data=load_doc(billingStatus="READY_FOR_ACCOUNTING", createdBy=OWNER, updatedBy=OWNER)),
 
+    # ---- THE PHASE 7 RECORD LOCK (the second acceptance criterion) ---------
+    dict(name="a write is REJECTED while someone else holds a fresh lock", allow=False, method="update",
+         path="/databases/(default)/documents/loads/L1", who=auth(FMT, "fmt"),
+         data=load_doc(updatedBy=FMT, routeName="edited by the second tab"),
+         prior=load_doc(lock={"lockedBy": OPS, "heartbeatAtMs": NOW_MS})),
+    dict(name="the lock HOLDER may keep writing", allow=True, method="update",
+         path="/databases/(default)/documents/loads/L1", who=auth(OPS, "us_ops"),
+         data=load_doc(updatedBy=OPS, routeName="edited by the holder"),
+         prior=load_doc(lock={"lockedBy": OPS, "heartbeatAtMs": NOW_MS})),
+    dict(name="a STALE lock does not block anyone", allow=True, method="update",
+         path="/databases/(default)/documents/loads/L1", who=auth(FMT, "fmt"),
+         data=load_doc(updatedBy=FMT, routeName="the other tab went away"),
+         prior=load_doc(lock={"lockedBy": OPS, "heartbeatAtMs": NOW_MS - 6 * 60 * 1000})),
+    dict(name="an unlocked load is writable", allow=True, method="update",
+         path="/databases/(default)/documents/loads/L1", who=auth(FMT, "fmt"),
+         data=load_doc(updatedBy=FMT), prior=load_doc()),
+    dict(name="US Ops may FORCE a lock by clearing it", allow=True, method="update",
+         path="/databases/(default)/documents/loads/L1", who=auth(OPS, "us_ops"),
+         data=load_doc(updatedBy=OPS, lock={"lockedBy": "", "heartbeatAtMs": 0}),
+         prior=load_doc(lock={"lockedBy": LEAD, "heartbeatAtMs": NOW_MS})),
+    dict(name="FMT may NOT force a lock", allow=False, method="update",
+         path="/databases/(default)/documents/loads/L1", who=auth(FMT, "fmt"),
+         data=load_doc(updatedBy=FMT, lock={"lockedBy": "", "heartbeatAtMs": 0}),
+         prior=load_doc(lock={"lockedBy": LEAD, "heartbeatAtMs": NOW_MS})),
+
+    # ---- notes are hidden, never deleted -----------------------------------
+    dict(name="a note CANNOT be deleted, even by the owner", allow=False, method="delete",
+         path="/databases/(default)/documents/loads/L1/notes/N1", who=auth(OWNER),
+         prior={"body": "called the receiver", "deletedAt": ""}),
+    dict(name="a note CAN be soft-deleted (hidden)", allow=True, method="update",
+         path="/databases/(default)/documents/loads/L1/notes/N1", who=auth(LEAD, "fmt_lead"),
+         data={"body": "called the receiver", "deletedAt": NOW,
+               "createdBy": OWNER, "createdAt": NOW, "updatedBy": LEAD, "updatedAt": NOW},
+         prior={"body": "called the receiver", "deletedAt": "",
+                "createdBy": OWNER, "createdAt": NOW, "updatedBy": OWNER, "updatedAt": NOW}),
+
     # ---- audit trail is append-only ---------------------------------------
     dict(name="an audit event can be written", allow=True, method="create",
          path="/databases/(default)/documents/loads/L1/audit/E1", who=auth(FMT, "fmt"),
@@ -173,6 +210,19 @@ CASES = [
          path="/databases/(default)/documents/lanes/lane-1", who=auth(OWNER),
          data={"origin": "x"}, prior={"origin": "y"}),
 ]
+
+
+def encode_value(v):
+    """Firestore REST value encoding. Nested maps matter here: the lock lives in
+    a map field, and encoding it as a string would make every lock case pass for
+    the wrong reason."""
+    if isinstance(v, bool):
+        return {"booleanValue": v}
+    if isinstance(v, (int, float)):
+        return {"integerValue": str(int(v))}
+    if isinstance(v, dict):
+        return {"mapValue": {"fields": {k: encode_value(x) for k, x in v.items()}}}
+    return {"stringValue": str(v)}
 
 
 def build_request(case):
@@ -217,12 +267,7 @@ def main() -> int:
         if "prior" in c:
             fields = {}
             for k, v in c["prior"].items():
-                if isinstance(v, bool):
-                    fields[k] = {"booleanValue": v}
-                elif isinstance(v, (int, float)):
-                    fields[k] = {"integerValue": str(int(v))}
-                else:
-                    fields[k] = {"stringValue": str(v)}
+                fields[k] = encode_value(v)
             docs.append({
                 "name": f"projects/{PROJECT}/databases{c['path']}",
                 "fields": fields,

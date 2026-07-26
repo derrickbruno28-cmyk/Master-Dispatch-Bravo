@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import html2canvas from 'html2canvas';
 import { jsPDF } from 'jspdf';
 import {
-  blankLoad, loadForCell, saveLoad, clearLoadCell, missingForDispatch,
+  blankLoad, loadForCell, loadById, saveLoad, clearLoadCell, missingForDispatch,
   buildSegments, proportionRevenue, syncSegmentAssignments,
   activeTrailerConflict, fmtMoney, fmtMiles, fmtCpm, type Load, type LoadStop, type LoadSegment, blankStop,
 } from '../data/loadsStore';
@@ -20,6 +20,12 @@ import AppointmentsPanel from './AppointmentsPanel';
 import DocumentsTab from './DocumentsTab';
 import ExceptionsTab from './ExceptionsTab';
 import { fetchExceptions, openExceptions } from '../data/tms/exceptionsStore';
+import { onChange } from '../data/bus';
+import NotesTab from './NotesTab';
+import {
+  fetchNotes, noteCount, lockStateOf, acquireLock, heartbeat, releaseLock,
+  forceUnlock, requestUnlock, LOCK_HEARTBEAT_MS,
+} from '../data/tms/notesStore';
 import { legsFor, missingForLegs, legTrucks, syncLegCells, seatName, driverNamesOf } from '../data/tms/assignmentsStore';
 import type { LoadAssignment } from '../data/tms/types';
 
@@ -31,7 +37,7 @@ import type { LoadAssignment } from '../data/tms/types';
 
 const STATUSES = ['unassigned', 'open', 'covered', 'dispatched', 'at yard', 'at shipper', 'en route', 'at receiver', 'delivered', 'completed', 'off'];
 
-type Tab = 'info' | 'stops' | 'milestones' | 'docs' | 'exceptions' | 'dispatch';
+type Tab = 'info' | 'stops' | 'milestones' | 'docs' | 'exceptions' | 'notes' | 'dispatch';
 
 export default function LoadDetailModal({ tractor, date, assignment, canDel, initialTab, warning, newLoad, seedLoad, onSave, onClear, onCreated, onClose }: {
   tractor: string; date: string; assignment?: Assignment; canDel: boolean; initialTab?: Tab; warning?: string;
@@ -79,6 +85,33 @@ export default function LoadDetailModal({ tractor, date, assignment, canDel, ini
      tab to find out something went wrong. */
   useEffect(() => { void fetchExceptions(l.id); }, [l.id]);
   const openExc = openExceptions(l.id).length;
+  useEffect(() => { void fetchNotes(l.id); }, [l.id]);
+  const notes = noteCount(l.id);
+
+  /* PHASE 7 — the record lock.
+     Claimed when the card opens, refreshed on a timer while it stays open, and
+     given back on close, on save, and on the tab going away. A lock that stops
+     breathing for five minutes is treated as gone (see types.lockIsActive), so a
+     closed laptop heals itself and nobody has to hunt for an admin. */
+  const [lock, setLock] = useState(() => lockStateOf(l));
+  useEffect(() => {
+    let alive = true;
+    void acquireLock(l).then((st) => { if (alive) setLock(st); });
+    const t = window.setInterval(() => { void heartbeat(l.id); }, LOCK_HEARTBEAT_MS);
+    const drop = () => { void releaseLock(l.id); };
+    window.addEventListener('beforeunload', drop);
+    return () => {
+      alive = false;
+      window.clearInterval(t);
+      window.removeEventListener('beforeunload', drop);
+      drop();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [l.id]);
+  /* re-read the claim on every store change — somebody else may have taken or
+     released it while this card sat open */
+  useEffect(() => onChange(() => setLock(lockStateOf(loadById(l.id) ?? l))), [l.id, l]);
+  const readOnly = lock.readOnly;
 
   /* rate-con drop → parse → apply as a highlighted, must-verify suggestion */
   async function onRateCon(file: File) {
@@ -143,18 +176,37 @@ export default function LoadDetailModal({ tractor, date, assignment, canDel, ini
           </div>
           <div className="load-head-btns">
             <button className="load-dispatch-btn" onClick={() => setTab('dispatch')}>⚡ Dispatch Driver</button>
-            <button className="am-save" onClick={saveAndClose}>Save</button>
+            <button className="am-save" disabled={readOnly}
+              title={readOnly ? `${lock.holder} has this load open — saving is off until they close it` : 'Save'}
+              onClick={saveAndClose}>Save</button>
             <button className="am-cancel" onClick={onClose}>Close</button>
           </div>
         </div>
 
         {/* tabs */}
         <div className="load-tabs">
-          {([['info', 'Load Info'], ['stops', l.segments.length ? `Stops · ✂${l.segments.length}` : 'Stops'], ['milestones', 'Milestones'], ['docs', 'Documents'], ['exceptions', openExc > 0 ? `Exceptions · ⚠${openExc}` : 'Exceptions'], ['dispatch', 'Dispatch']] as [Tab, string][]).map(([k, lab]) => (
+          {([['info', 'Load Info'], ['stops', l.segments.length ? `Stops · ✂${l.segments.length}` : 'Stops'], ['milestones', 'Milestones'], ['docs', 'Documents'], ['exceptions', openExc > 0 ? `Exceptions · ⚠${openExc}` : 'Exceptions'], ['notes', notes > 0 ? `Notes · 💬${notes}` : 'Notes'], ['dispatch', 'Dispatch']] as [Tab, string][]).map(([k, lab]) => (
             <button key={k} className={`load-tab ${tab === k ? 'on' : ''}`} onClick={() => setTab(k)}>{lab}</button>
           ))}
         </div>
 
+        {readOnly && (
+          <div className="lock-banner">
+            🔒 <b>{lock.holder} has this load open.</b> You are reading it, not editing it — saving is
+            off until they close it or their session times out.
+            <span className="lock-actions">
+              <button className="am-clear" onClick={() => void requestUnlock(l).then(() => setNotice('Asked them to close it — the request is in the notes thread.'))}>
+                Ask them to close it
+              </button>
+              {canDel && (
+                <button className="fleet-del" title="Break their claim. This is logged with their name."
+                  onClick={() => void forceUnlock(l).then((r) => { setNotice(r.ok ? '✓ Lock released.' : r.reason); setLock(lockStateOf(loadById(l.id) ?? l)); })}>
+                  Force unlock
+                </button>
+              )}
+            </span>
+          </div>
+        )}
         {warning && <div className="am-dblbook" style={{ marginBottom: 6 }}>{warning}</div>}
         {notice && <div className="am-notice">{notice}</div>}
         {verify && (
@@ -177,6 +229,7 @@ export default function LoadDetailModal({ tractor, date, assignment, canDel, ini
         {tab === 'milestones' && <MilestonesTab load={l} onStatus={() => setL((p) => ({ ...p }))} />}
         {tab === 'docs' && <DocumentsTab load={l} onLoad={(n) => setL(n)} />}
         {tab === 'exceptions' && <ExceptionsTab load={l} onOpenLoad={(n) => setL(n)} />}
+        {tab === 'notes' && <NotesTab load={l} readOnly={readOnly} />}
         {tab === 'dispatch' && (
           <DispatchTab l={l} legs={legs} missing={missing} flash={setNotice}
             onDispatched={async (sendTo) => {

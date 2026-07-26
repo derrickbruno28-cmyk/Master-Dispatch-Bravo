@@ -94,6 +94,31 @@ service cloud.firestore {
               && request.resource.data.get('missingPod', true) == false);
     }
 
+    /* ------------------------------------------------------ PHASE 7 the lock
+       A load open on somebody else's screen is CLAIMED, and the claim is
+       enforced here — a lock that only exists in the UI is a convention, and a
+       convention does not stop the second tab that already had the record open.
+
+       There is no `locked` boolean: a lock exists when lockedBy is set AND the
+       heartbeat is fresh. heartbeatAtMs is the epoch-millisecond twin of
+       heartbeatAt, and it exists precisely because rules cannot parse an ISO
+       string — the client writes both together (see types.LoadLock).
+
+       Stale beats free the record on their own, which is what makes a closed
+       laptop heal instead of stranding a load. The last clause lets FMT Lead,
+       US Ops and the Owner FORCE the lock — but only by clearing it, never by
+       editing the load out from under the holder in the same write. */
+    function lockHolder() { return resource.data.get('lock', {}).get('lockedBy', ''); }
+    function lockFresh() {
+      return request.time.toMillis() - resource.data.get('lock', {}).get('heartbeatAtMs', 0) < 300000;
+    }
+    function lockOk() {
+      return lockHolder() == ''
+          || lockHolder() == email()
+          || !lockFresh()
+          || (request.resource.data.get('lock', {}).get('lockedBy', '') == '' && mayDelete());
+    }
+
     match /loads/{loadId} {
       allow read:   if isCompany();
       allow create: if isCompany()
@@ -101,7 +126,8 @@ service cloud.firestore {
                     && billingGateOk();
       allow update: if isCompany()
                     && (!('updatedBy' in request.resource.data) || stampedUpdate())
-                    && billingGateOk();
+                    && billingGateOk()
+                    && lockOk();
       allow delete: if isCompany() && mayDelete();
 
       /* Subcollections — any role may add and edit, only non-FMT may delete. */
@@ -135,11 +161,15 @@ service cloud.firestore {
         allow update: if isCompany() && stampedUpdate();
         allow delete: if isCompany() && mayDelete();
       }
+      /* SOFT DELETE ONLY. A dispatch note is evidence of what somebody was told
+         and when — `deletedAt` hides it from the thread and the document stays.
+         Nobody deletes one, including the owner, which is why this is `false`
+         rather than mayDelete(). */
       match /notes/{noteId} {
         allow read:   if isCompany();
         allow create: if isCompany() && stampedCreate();
         allow update: if isCompany() && stampedUpdate();
-        allow delete: if isCompany() && mayDelete();
+        allow delete: if false;
       }
 
       /* APPEND-ONLY. An audit event is written once and then never edited or

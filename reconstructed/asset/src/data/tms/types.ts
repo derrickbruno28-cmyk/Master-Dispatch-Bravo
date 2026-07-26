@@ -224,9 +224,14 @@ export interface LoadLock {
   lockedByName: string;
   lockedAt: string;
   heartbeatAt: string;
+  /* The SAME instant as heartbeatAt, in epoch milliseconds. It exists because
+     firestore.rules cannot parse an ISO string into a time — and the lock has to
+     be enforced on the SERVER, not just in the UI, or it is a convention rather
+     than a lock. Always write the two together. */
+  heartbeatAtMs: number;
 }
 export function blankLock(): LoadLock {
-  return { lockedBy: '', lockedByName: '', lockedAt: '', heartbeatAt: '' };
+  return { lockedBy: '', lockedByName: '', lockedAt: '', heartbeatAt: '', heartbeatAtMs: 0 };
 }
 
 /* Is the lock live right now? Anything stale is treated as free. `now` is
@@ -281,6 +286,15 @@ export interface TmsLoad extends Partial<Omit<LegacyLoad, 'weight'>> {
   financials: LoadFinancials;
   dispatchNotes: string;
   parentLoadId: string;           // set when spawned from an exception (Phase 5)
+  /* PHASE 7 — the board shows the most recent note inline and a count on the
+     cell. Derived from the notes subcollection by notesStore.refreshNoteMirror,
+     for the same reason missingBol is on the load: a cell cannot open a
+     subcollection per truck-day. */
+  noteCount: number;
+  latestNote: string;
+  latestNoteCategory: string;
+  latestNoteAt: string;
+
   /* PHASE 5 — derived, like missingBol/missingPod: the board badges and filters
      cells with an open exception, and it cannot open a subcollection per cell.
      exceptionsStore.refreshExceptionFlag owns this field. */
@@ -480,6 +494,7 @@ export function blankTmsLoad(id: string, init?: Partial<TmsLoad>): TmsLoad {
     equipment: '', weight: null, commodity: '', isUspsContract: false,
     refs: blankRefs(), financials: blankFinancials(),
     dispatchNotes: '', parentLoadId: '', hasOpenException: false,
+    noteCount: 0, latestNote: '', latestNoteCategory: '', latestNoteAt: '',
     lock: blankLock(), lastLateReason: '',
     createdBy: '', createdAt: '', updatedBy: '', updatedAt: '',
     ...init,

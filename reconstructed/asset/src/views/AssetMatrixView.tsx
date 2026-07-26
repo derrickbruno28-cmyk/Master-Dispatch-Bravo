@@ -10,6 +10,7 @@ import {
 import { canDelete, canApproveSoloOverride } from '../data/permStore';
 import FastLog from './FastLog';
 import { missingBol, missingPod } from '../data/tms/documentsStore';
+import { lockStateOf } from '../data/tms/notesStore';
 import type { TmsLoad } from '../data/tms/types';
 import LoadDetailModal from './LoadDetailModal';
 import { loadAll, moveLoadCell, clearLoadCell, type Load } from '../data/loadsStore';
@@ -614,6 +615,20 @@ function TerminalRows({ term, trucks, dates, assign, setEditing, openDispatch, l
                     {(() => { const ld = loads.get(k); const tr = (ld?.assignedTrailer || '').trim();
                       return tr ? <div className="am-trailer" title={`Trailer #${tr} on this route`}>🚟 #{tr}</div> : null; })()}
                     {(() => {
+                      /* PHASE 7 — the most recent note, inline. Dispatch reads
+                         the board; making them open every load to find out the
+                         receiver called is how notes go unread. */
+                      const ld = loads.get(k) as unknown as
+                        { latestNote?: string; latestNoteCategory?: string; noteCount?: number } | undefined;
+                      if (!ld?.latestNote) return null;
+                      return (
+                        <div className={`am-cellnote ${ld.latestNoteCategory === 'Late Reason' ? 'late' : ''}`}
+                          title={ld.latestNote}>
+                          💬{(ld.noteCount ?? 0) > 1 ? ld.noteCount : ''} {ld.latestNote}
+                        </div>
+                      );
+                    })()}
+                    {(() => {
                       const ld = loads.get(k); const dc = ld ? (docCounts[ld.id] ?? 0) : 0;
                       return (
                         <div className="am-chipbadges">
@@ -629,6 +644,15 @@ function TerminalRows({ term, trucks, dates, assign, setEditing, openDispatch, l
                               )}
                             </span>
                           )}
+                          {(() => {
+                            /* PHASE 7 — somebody else has this record open. The
+                               cell says so before you click into it and find out. */
+                            const st = ld ? lockStateOf(ld) : null;
+                            return st?.active
+                              ? <span className={`am-lockbadge ${st.mine ? 'mine' : ''}`}
+                                  title={st.mine ? 'You have this load open' : `${st.holder} has this load open`}>🔒</span>
+                              : null;
+                          })()}
                           {(ld as unknown as { hasOpenException?: boolean } | undefined)?.hasOpenException && (
                             <span className="am-excbadge" title="Open exception — open the load and read the Exceptions tab">⚠</span>
                           )}
