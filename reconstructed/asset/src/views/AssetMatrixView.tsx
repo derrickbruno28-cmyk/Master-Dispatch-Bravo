@@ -500,6 +500,14 @@ function TerminalRows({ term, trucks, dates, assign, setEditing, openDispatch, l
                     <div className="am-route">
                       {a.route}
                       {a.usps && <span className="am-usps">USPS</span>}
+                      {/* PHASE 1: a multi-leg load writes a cell on every truck row
+                          it touches. This chip is what stops those rows reading as
+                          separate loads — same load, different leg. */}
+                      {(a.legCount ?? 0) > 1 && (
+                        <span className="am-legchip" title={`This load runs ${a.legCount} legs — this row is leg ${a.legIndex}. The other legs sit on their own trucks' rows.`}>
+                          leg {a.legIndex} of {a.legCount}
+                        </span>
+                      )}
                     </div>
                     <div className="am-status" style={{ color: STATUS_COLOR[a.status] }}>{STATUS_LABEL[a.status] ?? a.status}</div>
                     {(() => { const ld = loads.get(k); const tr = (ld?.assignedTrailer || '').trim();

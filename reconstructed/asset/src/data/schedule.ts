@@ -14,7 +14,14 @@ import { db, firebaseEnabled } from '../firebase';
 import { collection, deleteDoc, doc, getDocs, onSnapshot, query, setDoc, where } from 'firebase/firestore';
 import { emitChange } from './bus';
 
-export interface Assignment { route: string; status: string; usps: boolean }
+/* A board cell. legIndex/legCount/loadId are OPTIONAL and only set by multi-leg
+   loads (Phase 1): one load writes a cell on every truck row it touches, and the
+   leg fields are what let the grid show a "leg 1 of 2" chip so those rows read as
+   one load instead of several. Existing cells simply don't carry them. */
+export interface Assignment {
+  route: string; status: string; usps: boolean;
+  legIndex?: number; legCount?: number; loadId?: string;
+}
 
 export const cellKey = (tractor: string, date: string) => `${tractor}_${date}`;
 export function parseCellKey(k: string): { tractor: string; date: string } {

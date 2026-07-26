@@ -3,7 +3,7 @@ import html2canvas from 'html2canvas';
 import { jsPDF } from 'jspdf';
 import {
   blankLoad, loadForCell, saveLoad, clearLoadCell, missingForDispatch,
-  buildSegments, proportionRevenue, handoffLabel, syncSegmentAssignments, loadTrucks,
+  buildSegments, proportionRevenue, syncSegmentAssignments,
   activeTrailerConflict, fmtMoney, fmtMiles, fmtCpm, type Load, type LoadStop, type LoadSegment, blankStop,
 } from '../data/loadsStore';
 import { loadCustomers, ensureCustomer, EQUIPMENT_TYPES } from '../data/customersStore';
@@ -14,6 +14,9 @@ import { documentStore, type LoadDocument } from '../integrations/documents';
 import { routingProvider } from '../integrations/routing';
 import { rateConParser, applyRateCon } from '../integrations/ratecon';
 import { LOAD_STATUS_LABEL, type Assignment } from '../data/schedule';
+import AssignmentsSection from './AssignmentsSection';
+import { legsFor, missingForLegs, legTrucks, syncLegCells, seatName, driverNamesOf } from '../data/tms/assignmentsStore';
+import type { LoadAssignment } from '../data/tms/types';
 
 /* Load Detail modal — replaces the old 3-field inline cell editor. Tabbed shell
    (Load Info · Stops · Customer · Documents · Dispatch) over the rich Load
@@ -41,10 +44,31 @@ export default function LoadDetailModal({ tractor, date, assignment, canDel, ini
   const [notice, setNotice] = useState('');
   const [autoFilled, setAutoFilled] = useState<Set<string>>(new Set());
   const [verify, setVerify] = useState<{ filled: string[]; confidence: string } | null>(null);
-  const prevTrucks = useRef<string[]>(loadTrucks(l));
+  const prevTrucks = useRef<string[]>(legTrucks(l));
   const f = <K extends keyof Load>(k: K, v: Load[K]) => setL((p) => ({ ...p, [k]: v }));
 
-  const missing = missingForDispatch(l);
+  /* PHASE 1: the legs are the assignment now. Leg 1 is MIRRORED back onto the
+     legacy assignedTruck/assignedTrailer/driver fields so the board, the Loads
+     ledger, Team Status and the reports keep working untouched while they're
+     migrated one phase at a time. Drop this mirror only when nothing reads
+     those fields any more. */
+  const [legs, setLegs] = useState<LoadAssignment[]>(() => legsFor(l));
+  function onLegs(next: LoadAssignment[]) {
+    setLegs(next);
+    const first = next[0];
+    if (!first) return;
+    setL((p) => ({
+      ...p,
+      assignedTruck: first.truckNumber,
+      assignedTeamId: first.truckNumber,
+      assignedTrailer: first.trailerNumber,
+      driver1: seatName(first, 'primary'),
+      driver2: seatName(first, 'co'),
+    }));
+  }
+
+  /* the shell rules (route, customer, equipment, stops) plus every leg's own */
+  const missing = [...missingForDispatch(l), ...missingForLegs(legs)];
 
   /* rate-con drop → parse → apply as a highlighted, must-verify suggestion */
   async function onRateCon(file: File) {
@@ -77,10 +101,12 @@ export default function LoadDetailModal({ tractor, date, assignment, canDel, ini
        Existing (cell-bound) loads still need a route to stay on the board. */
     if (!(newLoad || seedLoad) && !l.routeName.trim()) { setNotice('Route name is required to save the load.'); setTab('info'); return; }
     const saved = await persist();
-    if (saved.segments.length > 0) {
-      /* split load: write a board cell per segment truck (and clear dropped ones) */
-      await syncSegmentAssignments(saved, prevTrucks.current);
-      prevTrucks.current = loadTrucks(saved);
+    if (legs.length > 1 || saved.segments.length > 0) {
+      /* multi-leg (or legacy split): a board cell per leg truck, clearing the
+         rows this load no longer touches */
+      if (legs.length > 1) await syncLegCells(saved, prevTrucks.current);
+      else await syncSegmentAssignments(saved, prevTrucks.current);
+      prevTrucks.current = legTrucks(saved);
       onClose();
       return;
     }
@@ -136,23 +162,24 @@ export default function LoadDetailModal({ tractor, date, assignment, canDel, ini
           </div>
         )}
 
-        {tab === 'info' && <InfoTab l={l} f={f} canDel={canDel} assignable={!!(newLoad || seedLoad)} autoFilled={autoFilled} onRateCon={onRateCon} onNotice={setNotice} onClear={() => { clearLoadCell(tractor, date); onClear(); }} />}
+        {tab === 'info' && <InfoTab l={l} f={f} onLegs={onLegs} canDel={canDel} assignable={!!(newLoad || seedLoad)} autoFilled={autoFilled} onRateCon={onRateCon} onNotice={setNotice} onClear={() => { clearLoadCell(tractor, date); onClear(); }} />}
         {tab === 'stops' && <StopsTab l={l} setL={setL} persist={persist} />}
         {tab === 'docs' && <DocsTab loadId={l.id} />}
         {tab === 'dispatch' && (
-          <DispatchTab l={l} missing={missing} flash={setNotice}
+          <DispatchTab l={l} legs={legs} missing={missing} flash={setNotice}
             onDispatched={async (sendTo) => {
               const saved = await persist({
                 status: 'dispatched', dispatchedAt: new Date().toISOString(),
                 segments: l.segments.map((s) => ({ ...s, status: 'dispatched' })),
               });
-              for (const truck of loadTrucks(saved)) {
+              for (const truck of legTrucks(saved)) {
                 const t = loadFleet().find((x) => x.tractor === truck);
                 if (t) saveTruck({ ...t, flyer: sendTo === 'team' ? 'team' : 'driver' });
               }
-              if (saved.segments.length > 0) {
-                await syncSegmentAssignments(saved, prevTrucks.current);
-                prevTrucks.current = loadTrucks(saved);
+              if (legs.length > 1 || saved.segments.length > 0) {
+                if (legs.length > 1) await syncLegCells(saved, prevTrucks.current);
+                else await syncSegmentAssignments(saved, prevTrucks.current);
+                prevTrucks.current = legTrucks(saved);
                 if (onCreated) onCreated(saved);
                 onClose();
                 return;
@@ -174,12 +201,12 @@ function Sum({ label, val, money }: { label: string; val: string; money?: boolea
 }
 
 /* ---------------- Load Info ---------------- */
-function InfoTab({ l, f, canDel, assignable, autoFilled, onRateCon, onNotice, onClear }: {
+function InfoTab({ l, f, canDel, assignable, autoFilled, onRateCon, onNotice, onClear, onLegs }: {
   l: Load; f: <K extends keyof Load>(k: K, v: Load[K]) => void; canDel: boolean; assignable?: boolean;
-  autoFilled: Set<string>; onRateCon: (file: File) => void | Promise<void>; onNotice: (m: string) => void; onClear: () => void;
+  autoFilled: Set<string>; onRateCon: (file: File) => void | Promise<void>; onNotice: (m: string) => void;
+  onClear: () => void; onLegs: (legs: LoadAssignment[]) => void;
 }) {
   const customers = useMemo(() => loadCustomers(), []);
-  const fleet = useMemo(() => loadFleet(), []);
   const trailers = useMemo(() => loadTrailers(), []);
   const [confirmClear, setConfirmClear] = useState(false);
   const [drag, setDrag] = useState(false);
@@ -207,18 +234,19 @@ function InfoTab({ l, f, canDel, assignable, autoFilled, onRateCon, onNotice, on
         </div>
         {assignable && (
           <div className="load-assign-box">
-            <div className="load-assign-title">Assignment <span className="am-muted">— start the schedule entry: type a truck # (any number — it doesn't have to be a set-up team) and the route date. Assign the trailer below. You can save with no route and fill the rest in later.</span></div>
+            <div className="load-assign-title">Schedule entry <span className="am-muted">— the day this load sits on the board. Trucks and crews are assigned per leg below; you can save with no route and fill the rest in later.</span></div>
             <div className="load-two">
-              <L t="Truck #">
-                <input className="am-input" list="load-trucks" value={l.assignedTruck}
-                  onChange={(e) => { f('assignedTruck', e.target.value); f('assignedTeamId', e.target.value); }}
-                  placeholder="type a truck # (or leave blank to place later)" />
-                <datalist id="load-trucks">{fleet.map((t) => <option key={t.tractor} value={t.tractor}>{[t.driver1, t.driver2].filter(Boolean).join(' / ') || t.type}</option>)}</datalist>
-              </L>
               <L t="Route date (pickup day)"><input className="am-input" type="date" value={l.date} onChange={(e) => f('date', e.target.value)} /></L>
+              <span />
             </div>
           </div>
         )}
+
+        {/* PHASE 1: legs replace the single Truck # field. The first leg's truck
+            is mirrored back onto the legacy assignedTruck/assignedTrailer fields
+            by onLegs below, so the board and every pre-Phase-1 view keep working
+            while they're migrated one at a time. */}
+        <AssignmentsSection load={l} onChanged={onLegs} />
         <L t="Route name *"><input className={hl('routeName')} value={l.routeName} onChange={(e) => f('routeName', e.target.value)} placeholder="FA2D3-544 Irving→SATX" /></L>
         <div className="load-two">
           <L t="Customer">
@@ -502,20 +530,45 @@ function DocsTab({ loadId }: { loadId: string }) {
 }
 
 /* ---------------- Dispatch (sheet → clipboard PNG / PDF) ---------------- */
-function DispatchTab({ l, missing, flash, onDispatched }: {
-  l: Load; missing: string[]; flash: (m: string) => void;
+function DispatchTab({ l, legs, missing, flash, onDispatched }: {
+  l: Load; legs: LoadAssignment[]; missing: string[]; flash: (m: string) => void;
   onDispatched: (sendTo: 'both' | 'team') => void | Promise<void>;
 }) {
   const [sendTo, setSendTo] = useState<'both' | 'team'>('both');
   const [inc, setInc] = useState({ stops: true, rate: true, ref: true, commodity: true, authority: true, notes: true });
-  const [segIdx, setSegIdx] = useState(0);
+  const [sheetIdx, setSheetIdx] = useState(0);
   const sheetRef = useRef<HTMLDivElement>(null);
   const allSorted = l.stops.slice().sort((a, b) => a.sequence - b.sequence);
-  const isSplit = l.segments.length > 0;
-  const seg = isSplit ? l.segments[Math.min(segIdx, l.segments.length - 1)] : null;
-  const activeTruck = seg ? seg.assignedTruck : l.assignedTruck;
-  const activeStops = seg ? allSorted.slice(seg.fromStop, seg.toStop + 1) : allSorted;
-  const activeRevenue = seg ? seg.segmentRevenue : l.rate;
+
+  /* PHASE 1: one sheet per LEG, plus one per individual DRIVER on that leg —
+     the Load/Driver Sheet dropdown. A driver sheet is the same leg cropped to
+     the one person, so a co-driver gets a sheet with their own name on it
+     instead of a copy addressed to the team. */
+  const sheets = useMemo(() => {
+    const out: { key: string; label: string; leg: LoadAssignment; driver?: string }[] = [];
+    for (const g of legs) {
+      const names = driverNamesOf(g);
+      const who = names.length ? names.join(' / ') : 'no driver';
+      out.push({
+        key: `${g.id}`,
+        label: `${legs.length > 1 ? `Leg ${g.legIndex} of ${legs.length}` : 'Load sheet'} · #${g.truckNumber || '—'} · ${who}`,
+        leg: g,
+      });
+      if (names.length > 1) {
+        for (const n of names) out.push({ key: `${g.id}:${n}`, label: `    ↳ Driver sheet · ${n} · #${g.truckNumber || '—'}`, leg: g, driver: n });
+      }
+    }
+    return out;
+  }, [legs]);
+
+  const active = sheets[Math.min(sheetIdx, sheets.length - 1)] ?? sheets[0];
+  const activeLeg = active?.leg;
+  const activeTruck = activeLeg?.truckNumber || l.assignedTruck;
+  /* leg stop range is 1-based and inclusive; slice is 0-based and exclusive */
+  const activeStops = activeLeg
+    ? allSorted.slice(Math.max(0, activeLeg.fromStopSeq - 1), activeLeg.toStopSeq)
+    : allSorted;
+  const activeRevenue = legs.length > 1 ? null : l.rate;
   const team = loadFleet().find((t) => t.tractor === activeTruck);
 
   async function toCanvas() {
@@ -547,10 +600,10 @@ function DispatchTab({ l, missing, flash, onDispatched }: {
   return (
     <div className="load-dispatch-grid">
       <div>
-        {isSplit && (
-          <L t={`Segment (${l.segments.length}) — a separate sheet per leg`}>
-            <select className="am-input" value={segIdx} onChange={(e) => setSegIdx(Number(e.target.value))}>
-              {l.segments.map((s, i) => <option key={s.id} value={i}>{s.label} · #{s.assignedTruck || '—'} · {handoffLabel(l, i - 1 < 0 ? 0 : i)}</option>)}
+        {sheets.length > 1 && (
+          <L t={`Load / Driver sheet (${sheets.length}) — one per leg, plus one per driver`}>
+            <select className="am-input" value={sheetIdx} onChange={(e) => setSheetIdx(Number(e.target.value))}>
+              {sheets.map((sh, i) => <option key={sh.key} value={i}>{sh.label}</option>)}
             </select>
           </L>
         )}
@@ -580,15 +633,24 @@ function DispatchTab({ l, missing, flash, onDispatched }: {
             <div style={{ fontWeight: 800, fontSize: 18, color: '#1e3a8a' }}>GH LOGISTICS</div>
             <div style={{ fontSize: 11, color: '#6b7280' }}>DRIVER LOAD SHEET</div>
           </div>
-          <div style={{ fontSize: 15, fontWeight: 700, margin: '10px 0 2px' }}>{l.routeName || 'Load'}{seg && ` — ${seg.label}`}</div>
+          <div style={{ fontSize: 15, fontWeight: 700, margin: '10px 0 2px' }}>
+            {l.routeName || 'Load'}{activeLeg && legs.length > 1 ? ` — ${activeLeg.legType}` : ''}
+          </div>
           <div style={{ fontSize: 11, color: '#6b7280', marginBottom: 8 }}>
-            Truck #{activeTruck}{team && (sendTo === 'both' ? ` · ${[team.driver1, team.driver2].filter(Boolean).join(' & ')}` : ' · Team')} · {l.date}
-            {seg && ` · leg ${segIdx + 1} of ${l.segments.length}`}
+            Truck #{activeTruck || '—'}
+            {/* a DRIVER sheet is addressed to that one person; a leg sheet lists the crew */}
+            {active?.driver
+              ? ` · ${active.driver}`
+              : (activeLeg && driverNamesOf(activeLeg).length
+                  ? ` · ${sendTo === 'both' ? driverNamesOf(activeLeg).join(' & ') : 'Team'}`
+                  : (team ? ` · ${[team.driver1, team.driver2].filter(Boolean).join(' & ')}` : ''))}
+            {' · '}{l.date}
+            {legs.length > 1 && activeLeg ? ` · leg ${activeLeg.legIndex} of ${legs.length}` : ''}
           </div>
           <table style={{ width: '100%', fontSize: 12, borderCollapse: 'collapse' }}><tbody>
             <Row k="Equipment" v={l.equipment || '—'} />
             {inc.commodity && <Row k="Commodity / Wt" v={[l.commodity, l.weight].filter(Boolean).join(' · ') || '—'} />}
-            {inc.rate && <Row k={seg ? 'Segment rate' : 'Rate'} v={fmtMoney(activeRevenue)} strong />}
+            {inc.rate && legs.length === 1 && <Row k="Rate" v={fmtMoney(activeRevenue)} strong />}
             {inc.ref && <Row k="Ref / Conf #" v={l.referenceNo || '—'} />}
             {inc.authority && <Row k="Booking auth." v={l.bookingAuthority || '—'} />}
           </tbody></table>
