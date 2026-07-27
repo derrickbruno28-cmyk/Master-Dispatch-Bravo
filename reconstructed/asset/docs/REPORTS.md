@@ -43,8 +43,15 @@ listed in Part 3.
 
 ---
 
-### 1. Truck P&L — best and worst earners  ⭐ the one you asked for
-**Answers:** which trucks bring in the most and the least, and who is in them.
+### 1. Truck P&L — best and worst earners  ✅ BUILT (v0.44.0)
+**Financials → Truck P&L.** Answers which trucks bring in the most and the
+least, and who is in them.
+
+Shipped with one thing this document did not anticipate: **revenue on a
+multi-leg load is split by leg miles**, not credited to leg 1. A relay would
+otherwise show the shuttle tractor earning the linehaul. Where a load has legs
+but no per-stop mileage the split is even and the row is marked ⚖ — the report
+says when a number is a division rather than a measurement.
 
 One row per truck, sorted by revenue, for any date range:
 
@@ -228,11 +235,14 @@ invoicing.
 
 ---
 
-# What I'd do first
+# What's next
 
-If you want one thing: **report 1, the truck P&L with the click-through to that
-truck's loads.** It is the question you actually asked, the data is all there, and
-it is the report that will change a decision — which trucks to keep running,
-which crews to move, and which lanes to stop taking.
+Report 1 is live. Of the rest, **report 2 (the driver scorecard)** is the natural
+follow-on — it reuses the same attribution engine, and the late-reason column is
+what separates a driver problem from a customer problem.
 
-Say the word and it is the next thing I build.
+**Report 5 (aging paperwork)** is the other one worth doing early: it is the
+Billing queue sorted by how long each load has been stuck, with the revenue at
+risk beside it, which turns "chase the paperwork" into "chase $47,000 of it".
+
+Say which and it is next.

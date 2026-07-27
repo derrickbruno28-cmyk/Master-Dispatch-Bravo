@@ -62,7 +62,8 @@ Newest first. **Current live version is flagged.** Use the SHA to revert.
 
 | Version | Commit | Date | What it added |
 |--------|--------|------|----------------|
-| **v0.43.0 ← LIVE** | `c5f5462` | 2026-07-26 | **Phase 10 — trailers + cleanup.** Trailer combobox (warns, never blocks), inline "+ Add trailer", CSV import; the ten stale-UI fixes incl. the merged Fleet page, the enum Booking Authority, Booking Terminal on the load, clickable Loads ledger, and destructive tools moved to a hidden `#admin` |
+| **v0.44.0 ← LIVE** | `2bfa399` | 2026-07-26 | **Truck P&L** (Financials → Truck P&L): revenue per truck split BY LEG MILES so a relay doesn't credit the linehaul to the shuttle, rev per day worked, deadhead %, OTP/OTD per truck, exception count, and a click-through to every load that truck ran. Also fixed: stops and milestones now persist in demo mode |
+| v0.43.0 | `c5f5462` | 2026-07-26 | **Phase 10 — trailers + cleanup.** Trailer combobox (warns, never blocks), inline "+ Add trailer", CSV import; the ten stale-UI fixes incl. the merged Fleet page, the enum Booking Authority, Booking Terminal on the load, clickable Loads ledger, and destructive tools moved to a hidden `#admin` |
 | v0.42.0 | `2346633` | 2026-07-26 | **Phase 9 — financials + Ready For Accounting.** Computed rate/FSC/revenue/CPM strip, miles from stops, Billing work queue with per-row blocked reason + CSV, authority/terminal splits on every report |
 | v0.41.0 | `3a5ca6f` | 2026-07-26 | **Phase 8 — rate con parsing.** USPS trip-ID engine (all 9 fixtures), labeled-field extraction, field-by-field review screen, Load Repository variance flags, source PDF auto-attached as RATE_CON |
 | v0.40.0 | `6aa6e5e` | 2026-07-26 | **Phase 7 — notes + record locking.** Threaded categorised notes (soft delete only), inline note on the board cell, heartbeat lock enforced in Firestore rules with Ask-to-close and audited Force unlock |
@@ -561,6 +562,6 @@ today and the full Samsara look the moment you add one free key.
 
 ---
 
-*Last updated: 2026-07-26 · live = **v0.43.0** (`c5f5462`) — the TMS Execution
+*Last updated: 2026-07-26 · live = **v0.44.0** (`2bfa399`) — the TMS Execution
 Layer, Phases 0–10, shipped and deployed. Ask me to update this doc whenever we
 ship a new version.*
