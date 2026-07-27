@@ -1209,3 +1209,8 @@
 .pnl-detail-head button { margin-left: auto; }
 .pnl-loads { font-size: 11px; min-width: 900px; }
 .pnl-loads td, .pnl-loads th { padding: 3px 7px; vertical-align: top; }
+
+/* the unassigned tray gained a delete — a load with no truck has no board cell,
+   so this is its only way out */
+.am-unassigned-wrap { display: inline-flex; align-items: center; gap: 3px; margin-right: 6px; }
+.am-tray-del { font-size: 10.5px; padding: 2px 6px; }

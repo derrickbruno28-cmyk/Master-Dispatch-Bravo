@@ -319,3 +319,15 @@ export function driverOptions(): { name: string; hint: string }[] {
 }
 
 export const LEG_TYPE_OPTIONS: LegType[] = ['Linehaul', 'Local Shuttle', 'Relay', 'Yard Move', 'Recovery'];
+
+
+/* Drop every trace of a deleted load from this store — see data/tms/deleteLoad.
+   Cache AND the demo copy on disk, because a localStorage entry keyed by a load
+   id that no longer exists is invisible garbage that grows forever. */
+export function purgeAssignments(loadId: string): void {
+  const next = { ...cache };
+  delete next[loadId];
+  cache = next;
+  fetched.delete(loadId);
+  if (!firebaseEnabled) writeLocal();
+}

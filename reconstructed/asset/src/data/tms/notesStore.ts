@@ -248,3 +248,15 @@ export async function requestUnlock(l: Load): Promise<void> {
 }
 
 export { LOCK_HEARTBEAT_MS };
+
+
+/* Drop every trace of a deleted load from this store — see data/tms/deleteLoad.
+   Cache AND the demo copy on disk, because a localStorage entry keyed by a load
+   id that no longer exists is invisible garbage that grows forever. */
+export function purgeNotes(loadId: string): void {
+  const next = { ...cache };
+  delete next[loadId];
+  cache = next;
+  fetched.delete(loadId);
+  if (!firebaseEnabled) writeLocal();
+}

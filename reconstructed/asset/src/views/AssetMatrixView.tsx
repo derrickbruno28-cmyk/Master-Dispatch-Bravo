@@ -11,6 +11,7 @@ import { canDelete, canApproveSoloOverride } from '../data/permStore';
 import FastLog from './FastLog';
 import { missingBol, missingPod } from '../data/tms/documentsStore';
 import { lockStateOf } from '../data/tms/notesStore';
+import { deleteLoad } from '../data/tms/deleteLoad';
 import type { TmsLoad } from '../data/tms/types';
 import LoadDetailModal from './LoadDetailModal';
 import { loadAll, moveLoadCell, clearLoadCell, type Load } from '../data/loadsStore';
@@ -99,6 +100,7 @@ export default function AssetMatrixView() {
   const [termFilter, setTermFilter] = useState<string>('ALL');
   const [posFilter, setPosFilter] = useState<string>('ALL');
   const [confirmClear, setConfirmClear] = useState<string | null>(null);
+  const [confirmTray, setConfirmTray] = useState<string | null>(null);
   const [notice, setNotice] = useState<string>('');
   const [canDel, setCanDel] = useState<boolean>(() => canDelete());
   const [fleet, setFleet] = useState<FleetTruck[]>(() => loadFleet());
@@ -294,9 +296,23 @@ export default function AssetMatrixView() {
           <div className="am-unassigned">
             <span className="am-unassigned-h">📥 Unassigned loads ({unassignedLoads.length}) — assign a truck to place on the board:</span>
             {unassignedLoads.map((l) => (
-              <button key={l.id} className="am-unassigned-chip" title="Open to assign a truck + date" onClick={() => setPlacing(l)}>
-                {l.routeName || 'Untitled load'}{l.customerName ? ` · ${l.customerName}` : ''}
-              </button>
+              /* The tray used to ONLY open a load. A load with no truck has no
+                 board cell, and clearing a cell was the only delete there was —
+                 so an untitled load parked here could never be removed. */
+              <span key={l.id} className="am-unassigned-wrap">
+                <button className="am-unassigned-chip" title="Open to assign a truck + date" onClick={() => setPlacing(l)}>
+                  {l.routeName || 'Untitled load'}{l.customerName ? ` · ${l.customerName}` : ''}
+                </button>
+                {confirmTray === l.id
+                  ? <>
+                      <button className="fleet-del am-tray-del" title="Delete this load for good"
+                        onClick={() => { void deleteLoad(l).then((r) => { setConfirmTray(null); flash(r.ok ? `✓ Deleted ${l.routeName || 'the untitled load'}.` : r.reason); setLoadsTick((n) => n + 1); }); }}>✓ Delete</button>
+                      <button className="am-clear am-tray-del" onClick={() => setConfirmTray(null)}>Keep</button>
+                    </>
+                  : canDel
+                    ? <button className="am-clear am-tray-del" title="Delete this load" onClick={() => setConfirmTray(l.id)}>🗑</button>
+                    : <button className="am-clear am-tray-del" disabled title="Deleting is restricted to FMT Lead / US Ops / Owner">🔒</button>}
+              </span>
             ))}
           </div>
         )}

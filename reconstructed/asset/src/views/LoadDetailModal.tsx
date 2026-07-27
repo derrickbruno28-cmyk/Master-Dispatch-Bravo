@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import html2canvas from 'html2canvas';
 import { jsPDF } from 'jspdf';
 import {
-  blankLoad, loadForCell, loadById, saveLoad, clearLoadCell, missingForDispatch,
+  blankLoad, loadForCell, loadById, saveLoad, missingForDispatch,
   buildSegments, proportionRevenue, syncSegmentAssignments,
   activeTrailerConflict, fmtMoney, fmtMiles, fmtCpm, type Load, type LoadStop, type LoadSegment, blankStop,
 } from '../data/loadsStore';
@@ -24,6 +24,7 @@ import { onChange } from '../data/bus';
 import NotesTab from './NotesTab';
 import RateConReview from './RateConReview';
 import { financialStrip, financialsOf } from '../data/tms/financials';
+import { deleteLoad } from '../data/tms/deleteLoad';
 import { FSC_TYPES, BOOKING_AUTHORITIES, BOOKING_TERMINALS, type FscType, type LoadFinancials } from '../data/tms/types';
 import { parseRateCon, type RateConProposal, type RateConPatch } from '../data/tms/rateconParse';
 import {
@@ -241,7 +242,8 @@ export default function LoadDetailModal({ tractor, date, assignment, canDel, ini
           <RateConReview proposal={proposal} load={l} file={rcFile}
             onApply={applyProposal} onCancel={() => { setProposal(null); setRcFile(null); }} />
         )}
-        {tab === 'info' && !proposal && <InfoTab l={l} f={f} onLegs={onLegs} canDel={canDel} assignable={!!(newLoad || seedLoad)} autoFilled={autoFilled} onRateCon={onRateCon} onNotice={setNotice} onClear={() => { clearLoadCell(tractor, date); onClear(); }} />}
+        {tab === 'info' && !proposal && <InfoTab l={l} f={f} onLegs={onLegs} canDel={canDel} saved={!!loadById(l.id)} assignable={!!(newLoad || seedLoad)} autoFilled={autoFilled} onRateCon={onRateCon} onNotice={setNotice}
+            onClear={() => { void deleteLoad(l).then((r) => { if (!r.ok) { setNotice(r.reason); return; } onClear(); }); }} />}
         {tab === 'stops' && <StopsTab l={l} setL={setL} persist={persist} />}
         {tab === 'milestones' && <MilestonesTab load={l} onStatus={() => setL((p) => ({ ...p }))} />}
         {tab === 'docs' && <DocumentsTab load={l} onLoad={(n) => setL(n)} />}
@@ -291,10 +293,10 @@ function Sum({ label, val, money }: { label: string; val: string; money?: boolea
 }
 
 /* ---------------- Load Info ---------------- */
-function InfoTab({ l, f, canDel, assignable, autoFilled, onRateCon, onNotice, onClear, onLegs }: {
+function InfoTab({ l, f, canDel, saved, assignable, autoFilled, onRateCon, onNotice, onClear, onLegs }: {
   l: Load; f: <K extends keyof Load>(k: K, v: Load[K]) => void; canDel: boolean; assignable?: boolean;
   autoFilled: Set<string>; onRateCon: (file: File) => void | Promise<void>; onNotice: (m: string) => void;
-  onClear: () => void; onLegs: (legs: LoadAssignment[]) => void;
+  saved: boolean; onClear: () => void; onLegs: (legs: LoadAssignment[]) => void;
 }) {
   const customers = useMemo(() => loadCustomers(), []);
   const trailers = useMemo(() => loadTrailers(), []);
@@ -407,15 +409,25 @@ function InfoTab({ l, f, canDel, assignable, autoFilled, onRateCon, onNotice, on
         <L t="Dispatch notes"><textarea className="am-input" rows={2} value={l.dispatchNotes} onChange={(e) => f('dispatchNotes', e.target.value)} /></L>
         <label className="am-usps-check"><input type="checkbox" checked={l.uspsContract} onChange={(e) => f('uspsContract', e.target.checked)} /> USPS contract route</label>
 
-        {!assignable && (
+        {/* The delete used to render only for cell-bound loads, which is exactly
+            why an unassigned "untitled" load could never be removed — it has no
+            cell. Any SAVED load can be deleted from here now; a brand-new one
+            that was never saved has nothing to delete. */}
+        {saved && (
           <div className="load-clear-row">
             {confirmClear
-              ? <><span className="am-muted">Remove this load from the board?</span>
-                  <button className="fleet-del" onClick={onClear}>✓ Remove</button>
-                  <button className="am-clear" onClick={() => setConfirmClear(false)}>Keep</button></>
+              ? <>
+                  <span className="am-muted">
+                    Delete <b>{l.routeName.trim() || '(untitled load)'}</b> for good? This removes its
+                    stops, milestones, documents and board chips. <b>The notes and the audit trail are
+                    kept</b> — both are evidence, and neither stops being true because the load was removed.
+                  </span>
+                  <button className="fleet-del" onClick={onClear}>✓ Delete it</button>
+                  <button className="am-clear" onClick={() => setConfirmClear(false)}>Keep</button>
+                </>
               : canDel
-                ? <button className="am-clear" onClick={() => setConfirmClear(true)}>🗑 Clear load off this day</button>
-                : <button className="am-clear" disabled title="Deleting is restricted to FMT Lead / US Ops / Owner">🔒 Clear (restricted)</button>}
+                ? <button className="am-clear" onClick={() => setConfirmClear(true)}>🗑 Delete this load</button>
+                : <button className="am-clear" disabled title="Deleting is restricted to FMT Lead / US Ops / Owner">🔒 Delete (restricted)</button>}
           </div>
         )}
       </div>

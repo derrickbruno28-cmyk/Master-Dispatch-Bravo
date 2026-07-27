@@ -10,12 +10,15 @@
    A confirmation dialog you can dismiss with the Enter key is not a safeguard.
    Typing the words is. */
 
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { isOwner } from '../data/permStore';
 import { firebaseEnabled } from '../firebase';
 import { clearAllAssignments } from '../data/schedule';
 import { resetFleetToBare } from '../data/fleetStore';
 import { hasLocalData, localCounts, restoreLocalToShared } from '../data/recoverLocal';
+import { stuckLoads, deleteLoad, STUCK_HELP } from '../data/tms/deleteLoad';
+import { fmtMoney } from '../data/loadsStore';
+import { onChange } from '../data/bus';
 
 export default function AdminView() {
   const [resetPhrase, setResetPhrase] = useState('');
@@ -23,7 +26,14 @@ export default function AdminView() {
   const [resetMsg, setResetMsg] = useState('');
   const [restoring, setRestoring] = useState(false);
   const [restoreMsg, setRestoreMsg] = useState('');
+  const [, force] = useState(0);
+  const [confirmStuck, setConfirmStuck] = useState('');
+  const [stuckMsg, setStuckMsg] = useState('');
   const counts = localCounts();
+
+  useEffect(() => onChange(() => force((n) => n + 1)), []);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const stuck = useMemo(() => stuckLoads(), [confirmStuck, stuckMsg]);
 
   if (!isOwner()) {
     return (
@@ -59,6 +69,61 @@ export default function AdminView() {
             one asks you to type its phrase first.
           </span>
         </div>
+      </div>
+
+      {/* Loads nobody can reach from the board. This is the list that answers
+          "there are loads I can't delete" — with WHY each one is unreachable,
+          because a delete button without an explanation just moves the mystery. */}
+      <div className="intg-card">
+        <div className="intg-card-head">
+          <div className="intg-card-title">
+            📦 Loads that aren't on the board <span className="intg-card-sub">{stuck.length} found</span>
+          </div>
+        </div>
+        <p className="am-muted" style={{ fontSize: 12.5, maxWidth: 820 }}>
+          A load is only removable from a board cell, so one with <b>no truck</b>, <b>no date</b>, or a
+          truck/date that no longer has a chip on the calendar has nowhere to be deleted from. They are
+          all here. Deleting one removes its stops, milestones, documents and any board chips —
+          <b> the notes and the audit trail are kept</b>, so there is always a record of what was
+          removed, by whom, and what anyone had said about it.
+        </p>
+        {stuckMsg && <div className="am-notice" style={{ color: 'var(--green)', marginBottom: 8 }}>{stuckMsg}</div>}
+        {stuck.length === 0
+          ? <div className="am-muted">Nothing stuck — every load is reachable from the board.</div>
+          : (
+            <div className="am-scroll">
+              <table className="am-grid pnl-loads">
+                <thead><tr><th>Load</th><th>Date</th><th>Customer</th><th>Truck</th><th>Rate</th><th>Why it's stuck</th><th></th></tr></thead>
+                <tbody>
+                  {stuck.map((x) => (
+                    <tr key={x.load.id}>
+                      <td><b>{x.label}</b><div className="am-muted bill-sub">{x.load.id}</div></td>
+                      <td className="am-muted">{x.load.date || '—'}</td>
+                      <td className="am-muted">{x.load.customerName || '—'}</td>
+                      <td className="am-muted">{x.load.assignedTruck ? `#${x.load.assignedTruck}` : '—'}</td>
+                      <td className="am-muted">{fmtMoney(x.load.rate)}</td>
+                      <td>
+                        <b className="bill-blocked">{x.reason}</b>
+                        <div className="am-muted bill-sub">{STUCK_HELP[x.reason]}</div>
+                      </td>
+                      <td className="fleet-actions">
+                        {confirmStuck === x.load.id
+                          ? <>
+                              <span className="am-muted">Delete?</span>
+                              <button className="fleet-del" onClick={() => void deleteLoad(x.load).then((r) => {
+                                setConfirmStuck('');
+                                setStuckMsg(r.ok ? `✓ Deleted ${x.label}.` : r.reason);
+                              })}>✓</button>
+                              <button className="am-clear" onClick={() => setConfirmStuck('')}>✕</button>
+                            </>
+                          : <button className="fleet-del" onClick={() => setConfirmStuck(x.load.id)}>🗑</button>}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
       </div>
 
       <div className="intg-card" style={{ borderColor: 'var(--red)' }}>
