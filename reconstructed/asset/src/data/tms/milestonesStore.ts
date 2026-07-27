@@ -44,6 +44,20 @@ const SUB = 'milestones';
 let cache: Record<string, LoadMilestone[]> = {};
 const fetched = new Set<string>();
 
+/* DEMO PERSISTENCE. Live data lives in Firestore; demo mode used to keep this
+   collection in memory only, so appointment windows, leg miles and logged
+   milestones evaporated on refresh — which made the demo quietly lie about
+   whether the work had been saved. Legs and notes already did this; these two
+   were the stragglers. */
+const LS_KEY = 'asset-tms-milestones-v1';
+function readLocal(): Record<string, LoadMilestone[]> {
+  try { const r = localStorage.getItem(LS_KEY); if (r) return JSON.parse(r) as Record<string, LoadMilestone[]>; }
+  catch { /* ignore */ }
+  return {};
+}
+function writeLocal() { try { localStorage.setItem(LS_KEY, JSON.stringify(cache)); } catch { /* ignore */ } }
+if (!firebaseEnabled) cache = readLocal();
+
 const MIN = 60 * 1000;
 const ms = (iso: string): number => { const t = Date.parse(iso || ''); return Number.isFinite(t) ? t : NaN; };
 
@@ -290,6 +304,7 @@ export async function logMilestone(l: LegacyLoad, input: LogInput): Promise<LogR
   };
 
   cache = { ...cache, [l.id]: [...storedMilestones(l.id).filter((x) => x.id !== id), m] };
+  if (!firebaseEnabled) writeLocal();
 
   if (firebaseEnabled && db) {
     try {
@@ -320,6 +335,7 @@ export async function logMilestone(l: LegacyLoad, input: LogInput): Promise<LogR
 export async function removeMilestone(loadId: string, milestoneId: string): Promise<void> {
   const gone = storedMilestones(loadId).find((m) => m.id === milestoneId);
   cache = { ...cache, [loadId]: storedMilestones(loadId).filter((m) => m.id !== milestoneId) };
+  if (!firebaseEnabled) writeLocal();
   if (firebaseEnabled && db) {
     try { await deleteDoc(doc(db, 'loads', loadId, SUB, milestoneId)); }
     catch (e) { console.error('milestone delete failed', e); }

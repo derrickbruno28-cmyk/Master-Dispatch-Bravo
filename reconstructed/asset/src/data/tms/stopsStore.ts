@@ -23,6 +23,20 @@ const SUB = 'stops';
 let cache: Record<string, LoadStopDoc[]> = {};
 const fetched = new Set<string>();
 
+/* DEMO PERSISTENCE. Live data lives in Firestore; demo mode used to keep this
+   collection in memory only, so appointment windows, leg miles and logged
+   milestones evaporated on refresh — which made the demo quietly lie about
+   whether the work had been saved. Legs and notes already did this; these two
+   were the stragglers. */
+const LS_KEY = 'asset-tms-stops-v1';
+function readLocal(): Record<string, LoadStopDoc[]> {
+  try { const r = localStorage.getItem(LS_KEY); if (r) return JSON.parse(r) as Record<string, LoadStopDoc[]>; }
+  catch { /* ignore */ }
+  return {};
+}
+function writeLocal() { try { localStorage.setItem(LS_KEY, JSON.stringify(cache)); } catch { /* ignore */ } }
+if (!firebaseEnabled) cache = readLocal();
+
 const bySeq = (a: LoadStopDoc, b: LoadStopDoc) => a.seq - b.seq;
 
 export function storedStops(loadId: string): LoadStopDoc[] {
@@ -132,6 +146,7 @@ export async function saveStops(loadId: string, stops: LoadStopDoc[]): Promise<L
     }));
 
   cache = { ...cache, [loadId]: next };
+  if (!firebaseEnabled) writeLocal();
 
   if (firebaseEnabled && db) {
     const database = db;
